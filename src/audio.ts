@@ -120,3 +120,14 @@ export function humStop(): void {
 export function thump(): void {
   tone(52, 0.09, 0.28, 'sine');
 }
+
+/** Sneaker squeak on the frozen lake — two thin sines sliding down. */
+export function squeak(): void {
+  tone(1750, 0.16, 0.05, 'sine');
+  tone(2350, 0.1, 0.03, 'sine');
+}
+
+/** Caught by staff: the alarm that ends your shift. */
+export function alarm(): void {
+  tone(720, 0.5, 0.3, 'square');
+}
