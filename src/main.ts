@@ -747,6 +747,47 @@ function shopperStep(s: Shopper, dt: number): void {
   }
 }
 
+// the rare absurd event: the Prisma incident re-enacts in the store
+let legend: { obj: THREE.Group; t: number; seen: boolean } | null = null;
+function spawnLegend(): void {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.32, 0.9, 10), mat(0x3a3f4a, 0.9));
+  body.position.y = 0.45; body.castShadow = true;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.17, 10, 8), skinMat);
+  head.position.y = 1.12;
+  const legs2 = new THREE.Mesh(new THREE.CylinderGeometry(0.26, 0.28, 0.5, 10), jeansMat);
+  legs2.position.y = 0.3;
+  g.add(body, head, legs2);
+  const spots: [number, number][] = [[-18, 14], [16, -14], [-16, -12.5], [18, 10]];
+  const p = spots[Math.floor(Math.random() * spots.length)];
+  g.position.set(p[0], 0, p[1]);
+  npcScene.add(g);
+  legend = { obj: g, t: 9, seen: false };
+  toast('Somewhere in the store... a man stands very still. You feel the presence of the legend.');
+  for (const s of staff) if (s.floor === 1 && Math.hypot(s.x - p[0], s.z - p[1]) < 14) spooked(s, '...I see it. I see it.');
+}
+function legendStep(dt: number): void {
+  if (!legend) return;
+  legend.t -= dt;
+  const squish = legend.t < 6 ? 0.55 : 1; // the slow, tragic crouch
+  legend.obj.scale.y += (squish - legend.obj.scale.y) * Math.min(1, 5 * dt);
+  if (legend.t < 6 && Math.random() < dt * 0.8) SFX.shhh(0.05, 0.08, 0.12);
+  const hd = Math.hypot(hero.position.x - legend.obj.position.x, hero.position.z - legend.obj.position.z);
+  if (hd < 10 && !legend.seen) {
+    legend.seen = true;
+    G.score += 15;
+    G.pressure = Math.max(0, G.pressure - 5);
+    toast('You witness the incident. The legend is real. Your bladder relaxes slightly. (+15)');
+    SFX.splash();
+  }
+  if (legend.t <= 0) {
+    legend.obj.parent?.remove(legend.obj);
+    legend = null;
+    SFX.plop();
+    toast('The legend leaves, their pants at full capacity. The store will never know.');
+  }
+}
+
 // wardrobe: the pants are the character
 type Pants = { key: string; name: string; desc: string; fill: number; recovery: number; sprint: number; dignity: number; unlock: string };
 const PANTS: Pants[] = [
@@ -909,6 +950,7 @@ function startRun(seed?: number): void {
   perkPicker?.remove(); perkPicker = null; perkPaused = false;
   closeWardrobe();
   strutting = false; strutT = 0; strutMirror = null; G.struts = 0;
+  if (legend) { legend.obj.parent?.remove(legend.obj); legend = null; }
   for (const d of splashDrops) { d.m.parent?.remove(d.m); (d.m.material as THREE.Material).dispose(); }
   splashDrops.length = 0;
   player.x = -18; player.z = 12; vel.x = 0; vel.z = 0;
@@ -1054,6 +1096,8 @@ window.__cap = {
     shoppers: shoppers.length,
     pants: { key: pantsNow().key, unlocked: [...pantsState.unlocked], equipped: pantsState.equipped },
     wardrobeOpen,
+    legendActive: !!legend,
+    legendPos: legend ? { x: +legend.obj.position.x.toFixed(1), z: +legend.obj.position.z.toFixed(1) } : null,
     inFreezer: isIce(player.x, player.z),
     slippery: isSlippery(player.x, player.z),
     staff: staff.filter((s) => s.floor === G.floor).map((s) => ({ s: s.state, d: +Math.hypot(hero.position.x - s.x, hero.position.z - s.z).toFixed(1) })),
@@ -1082,6 +1126,7 @@ window.__cap = {
   staffAway: () => {
     for (const s of staff) if (s.floor === 1) { s.x = 21.5; s.z = 16.5; s.state = 'patrol'; s.wpIdx = 0; s.obj.position.set(s.x, 0, s.z); }
   },
+  legend: () => { if (!legend && G.floor === 1) spawnLegend(); },
 };
 window.__pp = window.__cap;
 
@@ -1228,13 +1273,16 @@ function step(): void {
     // staff patrols + chase
     for (const s of staff) staffStep(s, dt);
     for (const s of shoppers) shopperStep(s, dt);
+    legendStep(dt);
     splashStep(dt);
 
     // random mess
     eventTimer -= dt;
     if (eventTimer <= 0) {
       eventTimer = 30 + Math.random() * 22;
-      if (G.floor === 1 && !flickerOn && Math.random() < 0.5) {
+      if (G.floor === 1 && !legend && Math.random() < 0.2) {
+        spawnLegend();
+      } else if (G.floor === 1 && !flickerOn && Math.random() < 0.5) {
         flickerOn = true; flickerT = 6;
         toast('The fluorescent strip above you commits to flickering. Pee-shivers incoming.');
         addMod(0.4);
