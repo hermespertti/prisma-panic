@@ -43,10 +43,13 @@ const BASE_FILL = 1.2;
 const RELIEF_RATE = 45;
 const ACCIDENT_RECOVERY = 35;
 const STATE_NAMES = ['FRESH', 'SQUEEZY', 'PRESSING', 'CRITICAL'];
+// difficulty = shift number mod 5: Monday is a gentle warmup, Friday shifts are chaos
+function shiftDifficulty(seed: number): number { return 1 + Math.floor(seed) % 5; }
+function shiftName(seed: number): string { return ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'][shiftDifficulty(seed) - 1]; }
 function stateIdx(): number { return G.floor === 2 ? (G.pressure < 40 ? 1 : G.pressure < 70 ? 2 : 3) : G.pressure < 40 ? 0 : G.pressure < 70 ? 1 : G.pressure < 90 ? 2 : 3; }
 function stateName(): string { return STATE_NAMES[stateIdx()]; }
 function pressureRate(): number {
-  let r = BASE_FILL + G.mods.reduce((a, b) => a + b, 0);
+  let r = BASE_FILL * (1 + 0.09 * (shiftDifficulty(G.seed) - 1)) + G.mods.reduce((a, b) => a + b, 0);
   if (G.wet) r *= 1.15;
   return r;
 }
@@ -64,6 +67,74 @@ function toast(msg: string): void {
   hudToast.textContent = msg;
   hudToast.style.opacity = '1';
   toastT = 3.2;
+}
+
+// ---------- perks: quota items turn into weird power ----------
+const PERKS: Record<string, { name: string; desc: string; apply: () => void }> = {
+  diuretic: {
+    name: 'DIURETIC',
+    desc: 'Free coffee is now +6 instead of +12. Your kidneys respect the hustle.',
+    apply: () => { perkCoffee = 6; toast('Perk: DIURETIC. The free coffee is almost a non-event.'); },
+  },
+  thick: {
+    name: 'PRISMA DENIM',
+    desc: 'Accidents recover to 25 instead of 35. The pants are load-bearing.',
+    apply: () => { perkRecovery = 25; toast('Perk: PRISMA DENIM. The pants hold more than pride now.'); },
+  },
+  slippery: {
+    name: 'WET-FLOOR WALTZ',
+    desc: 'Sprint speed up. Ice is no longer a complaint — it\'s a lifestyle.',
+    apply: () => { perkSprint = 0.75; toast('Perk: WET-FLOOR WALTZ. You commit to the slide.'); },
+  },
+  quiet: {
+    name: 'QUIET SHOE SOLES',
+    desc: 'Staff hear your squeaks from 7m instead of 11m. You are a ghost in a polo.',
+    apply: () => { perkSqueak = 7; toast('Perk: QUIET SHOE SOLES. The squeak stays yours.'); },
+  },
+  bladder: {
+    name: 'ELASTIC BLADDER',
+    desc: 'Max pressure 110. You can now hold more than is healthy.',
+    apply: () => { perkFull = 110; toast('Perk: ELASTIC BLADDER. The tank is bigger. The dread is bigger too.'); },
+  },
+};
+const PERK_KEYS = Object.keys(PERKS);
+let perkCoffee = 12, perkRecovery = 35, perkSprint = 0, perkSqueak = 11, perkFull = FULL;
+const perksTaken: string[] = [];
+let perkPicker: HTMLElement | null = null;
+let perkPaused = false;
+function showPerkPicker(): void {
+  if (perkPicker) return;
+  perkPaused = true;
+  const wrap = document.createElement('div');
+  wrap.className = 'picker';
+  const title = document.createElement('div');
+  title.className = 'ptitle';
+  title.textContent = 'QUOTA SECURED — THE STORE OFFERS A "BENEFIT"';
+  wrap.appendChild(title);
+  const rng = mulberry32(G.seed * 7 + G.quota * 131);
+  const shuffled = [...PERK_KEYS].sort(() => rng() - 0.5).slice(0, 3);
+  for (const key of shuffled) {
+    const p = PERKS[key];
+    const btn = document.createElement('button');
+    btn.className = 'popt';
+    const n = document.createElement('span');
+    n.className = 'pn';
+    n.textContent = `${p.name}  —  `;
+    const d = document.createElement('span');
+    d.textContent = p.desc;
+    btn.appendChild(n); btn.appendChild(d);
+    btn.addEventListener('click', () => {
+      p.apply();
+      perksTaken.push(key);
+      perkPicker?.remove();
+      perkPicker = null;
+      perkPaused = false;
+      SFX.thump();
+    });
+    wrap.appendChild(btn);
+  }
+  hud.appendChild(wrap);
+  perkPicker = wrap;
 }
 
 // ---------- renderer / scene ----------
@@ -642,7 +713,7 @@ function buildInteractables(): void {
     { x: 10, z: -10, r: 1.9, floor: 1, hint: () => (G.coffeeCd <= 0 ? 'Grab free coffee' : 'Coffee stand (out of samples)'), on: () => {
         if (G.coffeeCd > 0) { toast('"One at a time, dear," says the lady.'); return; }
         G.coffeeCd = 30;
-        G.pressure = Math.min(FULL, G.pressure + 12);
+        G.pressure = Math.min(perkFull, G.pressure + perkCoffee);
         G.mods.push(0.35);
         toast('Free espresso. Tastes like victory. (Your bladder notes this.)');
       } },
@@ -658,9 +729,12 @@ function startRun(seed?: number): void {
   G.seed = seed ?? Math.floor(Math.random() * 1e9);
   G.floor = 1;
   G.floors = new Set([1]);
-  G.pressure = 10; G.wet = false; G.runTime = 0; G.closing = clock;
+  G.pressure = 10; G.wet = false; G.runTime = 0; G.closing = 240 + Math.random() * 120;
   G.quota = 0; G.accidents = 0; G.score = 0; G.coffeeCd = 0;
   G.mods = []; G.toasts = []; G.ending = '';
+  perkCoffee = 12; perkRecovery = 35; perkSprint = 0; perkSqueak = 11; perkFull = FULL;
+  perksTaken.length = 0;
+  perkPicker?.remove(); perkPicker = null; perkPaused = false;
   player.x = -18; player.z = 12; vel.x = 0; vel.z = 0;
   relieving = false;
   // wipe last run's leftovers: puddles, flicker, event clock
@@ -672,7 +746,7 @@ function startRun(seed?: number): void {
   buildSeedLayout(G.seed);
   buildInteractables();
   applyAtmos(1);
-  toast(`Shift #${G.seed} — quota first, then the deck. Find a toilet before the pants decide.`);
+  toast(`Shift #${G.seed} (${shiftName(G.seed)} shift, difficulty ${shiftDifficulty(G.seed)}/5) — quota first, then the deck.`);
   sumLbl.style.display = 'none';
   wetLbl.style.display = 'none';
   alertLbl.style.display = 'none';
@@ -681,7 +755,7 @@ function startRun(seed?: number): void {
 function accident(caught = false): void {
   if (caught) return;
   G.wet = true;
-  G.pressure = ACCIDENT_RECOVERY;
+  G.pressure = perkRecovery;
   G.accidents++;
   toast("...SPLASH. You heard that, didn't you?");
   SFX.splash(); SFX.plop();
@@ -699,8 +773,12 @@ function endRun(ending: string): void {
   SFX.humStop();
   const bonus = ending.startsWith('CLEAN') ? 50 : ending.startsWith('WET') ? 25 : ending.startsWith('CAUGHT') ? 15 : 10;
   G.score += bonus;
+  const diff = shiftDifficulty(G.seed);
+  G.score += (diff - 1) * 12;
+  let rank = 'D';
+  if (G.score >= 110) rank = 'S'; else if (G.score >= 90) rank = 'A'; else if (G.score >= 70) rank = 'B'; else if (G.score >= 50) rank = 'C';
   sumLbl.textContent =
-    `RUN COMPLETE — seed #${G.seed}\n\n${ending}\n\nShift time ${fmt(G.runTime)} · Quota ${G.quota}/3 · Accidents ${G.accidents} · Floors ${G.floors.size}/2\nSCORE ${G.score}\n\n[ press R to run it back — new seed, new store ]`;
+    `RUN COMPLETE — seed #${G.seed} (${shiftName(G.seed)}, difficulty ${diff}/5)\n\n${ending}\n\nShift time ${fmt(G.runTime)} · Quota ${G.quota}/3 · Accidents ${G.accidents} · Floors ${G.floors.size}/2\nSCORE ${G.score} — RANK ${rank}\n\n[ press R to run it back — new seed, new store ]`;
   sumLbl.style.display = 'block';
 }
 
@@ -716,7 +794,7 @@ function staffStep(s: Staff, dt: number): void {
       spooked(s, G.wet ? 'SECURITY! WE HAVE A CODE PEED!' : 'Why is this man SPRINTING?');
     } else if (G.wet && heroD < 4.5) {
       spooked(s, 'SECURITY! WE HAVE A CODE PEED!');
-    } else if (heardSqueak && heroD < 11) {
+    } else if (heardSqueak && heroD < perkSqueak) {
       staffHear(s, player.x, player.z, s.floor === 2 ? '...squeak... on my deck...' : '...squeak squeak squeak...');
     }
   } else if (s.state === 'alert') {
@@ -789,10 +867,15 @@ window.__cap = {
     quota: G.quota, closing: Math.max(0, Math.round(G.closing)),
     accidents: G.accidents, score: G.score, relieving,
     floor: G.floor, seed: G.seed,
+    difficulty: shiftDifficulty(G.seed), shiftName: shiftName(G.seed),
+    perkPickerOpen: perkPicker !== null,
+    perks: [...perksTaken],
+    runTime: +G.runTime.toFixed(1),
     inFreezer: isIce(player.x, player.z),
     slippery: isSlippery(player.x, player.z),
     staff: staff.filter((s) => s.floor === G.floor).map((s) => ({ s: s.state, d: +Math.hypot(hero.position.x - s.x, hero.position.z - s.z).toFixed(1) })),
     toasts: [...G.toasts], ending: G.ending,
+    summary: (document.querySelector('.summary') as HTMLElement)?.textContent || '',
   }),
   keys: (k: string, down: boolean) => { if (down) keys.add(k); else keys.delete(k); },
   walk: (down: boolean) => { if (down) keys.add('KeyW'); else keys.delete('KeyW'); },
@@ -801,7 +884,8 @@ window.__cap = {
   restart: (seed?: number) => startRun(seed),
   seed: (s?: number) => ({ seed: G.seed, rebuild: () => startRun(s) }),
   floor: (n: number) => { if (n === G.floor) return; G.floor = n; G.floors.add(n); applyAtmos(n); },
-  set: (k: string, v: number) => { if (k === 'pressure') { G.pressure = v; if (v >= FULL) accident(); } if (k === 'closing') G.closing = v; },
+  set: (k: string, v: number) => { if (k === 'pressure') { G.pressure = v; if (v >= perkFull) accident(); } if (k === 'closing') G.closing = v; },
+  perkForce: () => { if (!perkPicker && G.mode === 'play') showPerkPicker(); },
 };
 window.__pp = window.__cap;
 
@@ -858,7 +942,7 @@ function step(): void {
   const dt = Math.min(0.05, (performance.now() - last) / 1000);
   last = performance.now();
 
-  if (G.mode === 'play') {
+  if (G.mode === 'play' && !perkPaused) {
     G.runTime += dt;
     G.closing -= dt;
     G.coffeeCd -= dt;
@@ -870,8 +954,8 @@ function step(): void {
       G.pressure = Math.max(0, G.pressure - RELIEF_RATE * dt);
       if (G.pressure <= 4) { relieving = false; toast("Ahhhh. That's the spot. (The pants, sadly, stay as they are.)"); }
     } else {
-      G.pressure = Math.min(FULL, G.pressure + pressureRate() * dt);
-      if (G.pressure >= FULL) accident();
+      G.pressure = Math.min(perkFull, G.pressure + pressureRate() * dt);
+      if (G.pressure >= perkFull) accident();
     }
 
     // movement
@@ -884,7 +968,7 @@ function step(): void {
       if (keys.has('KeyD') || keys.has('ArrowRight')) mx += 1;
     }
     const moving = mx !== 0 || mz !== 0;
-    let sp = sprinting && moving ? SPRINT : SPEED;
+    let sp = sprinting && moving ? SPRINT + perkSprint : SPEED;
     if (G.wet) sp *= 0.88;
     const onIce = isSlippery(player.x, player.z);
     if (moving) {
@@ -926,7 +1010,12 @@ function step(): void {
       if (q.f === G.floor && Math.hypot(q.x - player.x, q.z - player.z) < 1.1) {
         q.mesh.visible = false;
         G.quota++; G.score += 10;
-        toast(`Quota item secured. (${G.quota}/3)`);
+        if (G.quota === 1 || G.quota === 2) {
+          toast(`Quota item secured. (${G.quota}/3) The store manager is watching you now.`);
+          showPerkPicker();
+        } else {
+          toast(`Quota item secured. (${G.quota}/3) Trunk's open. Run.`);
+        }
         SFX.thump();
       }
     }
