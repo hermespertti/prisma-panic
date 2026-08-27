@@ -34,6 +34,8 @@ const G = {
   floor: 1,            // 1 = market hall, 2 = parking deck
   floors: new Set<number>([1]),
   seed: 4271,
+  struts: 0,           // M4: dignity events
+  rank: '',            // last run's rank (S/A/B/C/D)
 };
 declare global { interface Window { __cap: any; __pp: any } }
 
@@ -49,7 +51,7 @@ function shiftName(seed: number): string { return ['MONDAY', 'TUESDAY', 'WEDNESD
 function stateIdx(): number { return G.floor === 2 ? (G.pressure < 40 ? 1 : G.pressure < 70 ? 2 : 3) : G.pressure < 40 ? 0 : G.pressure < 70 ? 1 : G.pressure < 90 ? 2 : 3; }
 function stateName(): string { return STATE_NAMES[stateIdx()]; }
 function pressureRate(): number {
-  let r = BASE_FILL * (1 + 0.09 * (shiftDifficulty(G.seed) - 1)) + G.mods.reduce((a, b) => a + b, 0);
+  let r = BASE_FILL * (1 + 0.09 * (shiftDifficulty(G.seed) - 1) + pantsNow().fill) + G.mods.reduce((a, b) => a + b, 0);
   if (G.wet) r *= 1.15;
   return r;
 }
@@ -382,6 +384,17 @@ function buildHall(seed: number): void {
   makeToilet(g, -22, -14.5, Math.PI / 2, 0x66ff99);
   addBox(1, -22, -14.5, 0.45, 0.45);
   makeToilet(g, 20.2, 16.2, -Math.PI / 2, 0xff5577);
+  // the mirror by the entrance — strut here and the pants decide your legacy
+  {
+    const mirror = new THREE.Group();
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(1.5, 2.3, 0.08), mat(0x3a4451, 0.6));
+    frame.position.y = 1.5; frame.castShadow = true;
+    const glass = new THREE.Mesh(new THREE.BoxGeometry(1.26, 2.05, 0.03), new THREE.MeshStandardMaterial({ color: 0xbfd4e6, roughness: 0.08, metalness: 0.85 }));
+    glass.position.set(0, 1.5, 0.05);
+    mirror.add(frame, glass);
+    mirror.position.set(-6, 0, -15.85);
+    g.add(mirror);
+  }
   // break-room walls (SE): the gap at x≈14.9 is your sprint heroics
   box(g, 1, 0.4, 3.2, 3.0, 14.6, 1.6, 12.9, mat(0x6f5c46));
   box(g, 1, 0.4, 3.2, 1.2, 14.6, 1.6, 16.1, mat(0x6f5c46));
@@ -643,7 +656,161 @@ function applyAtmos(floor: number): void {
 }
 
 // ---------- interact registry (per floor) ----------
-type Inter = { x: number; z: number; r: number; floor: number; hint: () => string; on: () => void };
+// ---------- M4: The Strut, splash, shoppers, wardrobe ----------
+let strutting = false, strutT = 0, strutDoneAt = 0, strutMirror: { x: number; z: number } | null = null;
+function endStrut(): void {
+  if (!strutting) return;
+  strutting = false;
+  const bonus = (G.wet ? 25 : 15) + pantsNow().dignity;
+  G.score += bonus;
+  G.struts++;
+  toast(G.wet ? `THE CONFIDENT STRUT. The pants are soaked and the walk doesn't care. (+${bonus} dignity)` : `The Strut. Dignity, briefly restored. (+${bonus} dignity)`);
+  for (const s of staff) {
+    if (s.floor !== 1) continue;
+    if (Math.hypot(hero.position.x - s.x, hero.position.z - s.z) < 12 && staffSeen(s)) spooked(s, 'WHAT IS THIS MAN DOING?!');
+  }
+}
+
+const splashDrops: { m: THREE.Mesh; vx: number; vy: number; vz: number; t: number }[] = [];
+const splashGeo = new THREE.SphereGeometry(0.06, 6, 5);
+function spawnSplash(x: number, z: number): void {
+  for (let i = 0; i < 12; i++) {
+    const m = new THREE.Mesh(splashGeo, new THREE.MeshBasicMaterial({ color: 0x7fd4ff, transparent: true, opacity: 0.9 }));
+    m.position.set(x + (Math.random() - 0.5) * 0.4, 0.9, z + (Math.random() - 0.5) * 0.4);
+    scene.add(m);
+    splashDrops.push({ m, vx: (Math.random() - 0.5) * 5, vy: 1.5 + Math.random() * 3.5, vz: (Math.random() - 0.5) * 5, t: 0.6 + Math.random() * 0.5 });
+  }
+}
+function splashStep(dt: number): void {
+  for (let i = splashDrops.length - 1; i >= 0; i--) {
+    const d = splashDrops[i];
+    d.t -= dt; d.vy -= 11 * dt;
+    d.m.position.x += d.vx * dt; d.m.position.y += d.vy * dt; d.m.position.z += d.vz * dt;
+    (d.m.material as THREE.Material).opacity = Math.max(0, d.t * 1.3);
+    if (d.t <= 0 || d.m.position.y < 0.04) { d.m.parent?.remove(d.m); (d.m.material as THREE.Material).dispose(); splashDrops.splice(i, 1); }
+  }
+}
+
+type Shopper = { obj: THREE.Group; legs: THREE.Object3D[]; x: number; z: number; yaw: number; tx: number; tz: number; phase: number; nextReact: number; incident: number };
+const shoppers: Shopper[] = [];
+const npcScene = new THREE.Group();
+scene.add(npcScene);
+const shopperSpots: [number, number][] = [[-16, 6], [-8, -13], [0, 10], [10, -13], [16, 6], [-18, -4], [14, -4], [-4, 13], [-14, -10], [6, 6]];
+const shopperPalette = [0xc25b5b, 0x5b8ac2, 0x9a5bc2, 0x5bc28a, 0xc2a45b];
+function makeShopper(x: number, z: number): Shopper {
+  const g = new THREE.Group();
+  const topMat = mat(shopperPalette[Math.floor(Math.random() * shopperPalette.length)], 0.9);
+  mk(new THREE.CylinderGeometry(0.28, 0.3, 0.6, 10), topMat, 0, 1.24, 0, g);
+  mk(new THREE.CylinderGeometry(0.15, 0.15, 0.64, 8), mat(0x4a5568, 0.9), 0, 0.62, 0, g);
+  mk(new THREE.SphereGeometry(0.16, 10, 8), skinMat, 0, 1.74, 0, g);
+  const legs: THREE.Object3D[] = [];
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Group(); leg.position.set(s * 0.12, 0.62, 0); g.add(leg);
+    mk(new THREE.CylinderGeometry(0.1, 0.1, 0.6, 8), mat(0x4a5568, 0.9), 0, -0.3, 0, leg);
+    legs.push(leg);
+  }
+  const cart = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.6, 0.4), mat(0xb9c2cc, 0.4));
+  cart.position.set(0.45, 0.45, 0.25); cart.castShadow = true; g.add(cart);
+  g.position.set(x, 0, z);
+  npcScene.add(g);
+  return { obj: g, legs, x, z, yaw: 0, tx: x, tz: z, phase: Math.random() * 6, nextReact: 8 + Math.random() * 10, incident: 0 };
+}
+function shopperStep(s: Shopper, dt: number): void {
+  if (s.incident > 0) {
+    s.incident -= dt;
+    s.phase += dt * 7;
+    for (let i = 0; i < 2; i++) s.legs[i].rotation.x = Math.sin(s.phase + i * Math.PI) * 0.9;
+    s.obj.position.set(s.x, 0, s.z);
+    return;
+  }
+  const dx = s.tx - s.x, dz = s.tz - s.z;
+  const d = Math.hypot(dx, dz);
+  if (d < 0.6) {
+    const p = shopperSpots[Math.floor(Math.random() * shopperSpots.length)];
+    s.tx = p[0]; s.tz = p[1];
+  } else {
+    const nx = s.x + (dx / d) * 1.7 * dt, nz = s.z + (dz / d) * 1.7 * dt;
+    s.x = nx; s.z = nz;
+    s.yaw = THREE.MathUtils.lerp(s.yaw, Math.atan2(dx, dz), Math.min(1, 8 * dt));
+    s.phase += dt * 3.4;
+    for (let i = 0; i < 2; i++) s.legs[i].rotation.x = Math.sin(s.phase + i * Math.PI) * 0.4;
+    s.obj.position.set(s.x, 0, s.z);
+    s.obj.rotation.y = s.yaw;
+  }
+  if (G.wet && G.mode === 'play' && G.runTime > s.nextReact) {
+    const hd = Math.hypot(hero.position.x - s.x, hero.position.z - s.z);
+    if (hd < 7) {
+      s.nextReact = G.runTime + 14 + Math.random() * 12;
+      const lines = ['"Oh. OH."', 'A shopper pretends not to smell that.', '"It\'s the wet-jeans man."', 'Someone is filming this. For TikTok.', 'A shopper quietly grabs their cart for leverage.'];
+      toast(lines[Math.floor(Math.random() * lines.length)]);
+    }
+  }
+}
+
+// wardrobe: the pants are the character
+type Pants = { key: string; name: string; desc: string; fill: number; recovery: number; sprint: number; dignity: number; unlock: string };
+const PANTS: Pants[] = [
+  { key: 'staff', name: 'STAFF-ISSUED 501s', desc: 'The pants they gave you. The pants that betray you.', fill: 0, recovery: 35, sprint: 0, dignity: 0, unlock: '—' },
+  { key: 'ghost', name: 'GHOST PANTS', desc: 'Sprint +0.3 · fills +0.15 faster. You move like a rumor.', fill: 0.15, recovery: 35, sprint: 0.3, dignity: 0, unlock: 'Finish any shift' },
+  { key: 'leak', name: 'LEAK-PROOF LEGEND', desc: 'Accident recovery to 25 · fills +0.1 faster. Waterproof shame.', fill: 0.1, recovery: 25, sprint: 0, dignity: 0, unlock: '3 accidents in one shift' },
+  { key: 'prisma', name: 'THE PRISMA 2020', desc: 'THE pants. Sprint +0.5 · dignity +10 · but they fill +0.3 faster.', fill: 0.3, recovery: 20, sprint: 0.5, dignity: 10, unlock: 'Earn an S rank' },
+];
+let pantsState = { unlocked: ['staff'], equipped: 'staff' } as { unlocked: string[]; equipped: string };
+try {
+  const raw = localStorage.getItem('pp_pants_v1');
+  if (raw) pantsState = JSON.parse(raw);
+} catch { /* first visit */ }
+function pantsNow(): Pants { return PANTS.find((p) => p.key === pantsState.equipped) || PANTS[0]; }
+function savePants(): void { try { localStorage.setItem('pp_pants_v1', JSON.stringify(pantsState)); } catch { /* private mode */ } }
+function checkUnlocks(): void {
+  let changed = false;
+  const add = (k: string) => { if (!pantsState.unlocked.includes(k)) { pantsState.unlocked.push(k); changed = true; toast('WARDROBE UNLOCKED: ' + (PANTS.find((p) => p.key === k)?.name || k) + ' — press B'); } };
+  add('ghost');
+  if (G.accidents >= 3) add('leak');
+  if (G.rank === 'S') add('prisma');
+  if (changed) savePants();
+}
+let wardrobeOpen = false, wardrobeWrap: HTMLElement | null = null;
+function closeWardrobe(): void { if (wardrobeWrap) { wardrobeWrap.remove(); wardrobeWrap = null; } wardrobeOpen = false; savePants(); }
+function showWardrobe(): void {
+  if (wardrobeOpen) return;
+  wardrobeOpen = true;
+  const wrap = document.createElement('div');
+  wrap.className = 'picker';
+  const title = document.createElement('div');
+  title.className = 'ptitle';
+  title.textContent = 'WARDROBE — because the pants are the character';
+  wrap.appendChild(title);
+  for (const p of PANTS) {
+    const locked = !pantsState.unlocked.includes(p.key);
+    const btn = document.createElement('button');
+    btn.className = 'popt';
+    if (locked) btn.style.opacity = '0.45';
+    const n = document.createElement('span');
+    n.className = 'pn';
+    n.textContent = (pantsState.equipped === p.key ? '● ' : '') + p.name + (locked ? '  (LOCKED)' : '') + '  —  ';
+    const d = document.createElement('span');
+    d.textContent = locked ? `Unlock: ${p.unlock}` : p.desc;
+    btn.appendChild(n); btn.appendChild(d);
+    if (!locked) btn.addEventListener('click', () => {
+      pantsState.equipped = p.key; savePants();
+      toast('Equipped: ' + p.name);
+      SFX.thump();
+      closeWardrobe();
+    });
+    wrap.appendChild(btn);
+  }
+  const close = document.createElement('button');
+  close.className = 'popt';
+  close.style.textAlign = 'center';
+  close.textContent = '[B] Close the wardrobe';
+  close.addEventListener('click', closeWardrobe);
+  wrap.appendChild(close);
+  hud.appendChild(wrap);
+  wardrobeWrap = wrap;
+}
+
+type Inter = { x: number; z: number; r: number; floor: number; hold?: number; hint: () => string; on: () => void };
 const interactables: Inter[] = [];
 function nearest(list: Inter[], x: number, z: number): Inter | null {
   let best: Inter | null = null, bd = 2.1;
@@ -699,12 +866,17 @@ function buildSeedLayout(seed: number): void {
   }
   for (const s of staff) s.obj.userData.staff = true;
   for (const s of staff) s.obj.traverse((o: any) => { o.userData.staff = true; });
+  // shoppers: the silent jury (floor 1 only)
+  while (npcScene.children.length > 0) npcScene.remove(npcScene.children[0]);
+  shoppers.length = 0;
+  for (const p of shopperSpots) shoppers.push(makeShopper(p[0], p[1]));
 }
 
 // ---------- seed helpers ----------
 function buildInteractables(): void {
   interactables.length = 0;
   interactables.push(
+    { x: -6, z: -14.6, r: 1.7, floor: 1, hold: 1.4, hint: () => 'Hold [E] — check yourself in the mirror', on: () => endStrut() },
     { x: -22, z: -14.5, r: 2.1, floor: 1, hint: () => 'Use the toilet', on: () => { relieving = true; } },
     { x: 20.2, z: 16.2, r: 2.0, floor: 1, hint: () => 'Use the STAFF toilet (legally risky)', on: () => {
         relieving = true;
@@ -735,6 +907,10 @@ function startRun(seed?: number): void {
   perkCoffee = 12; perkRecovery = 35; perkSprint = 0; perkSqueak = 11; perkFull = FULL;
   perksTaken.length = 0;
   perkPicker?.remove(); perkPicker = null; perkPaused = false;
+  closeWardrobe();
+  strutting = false; strutT = 0; strutMirror = null; G.struts = 0;
+  for (const d of splashDrops) { d.m.parent?.remove(d.m); (d.m.material as THREE.Material).dispose(); }
+  splashDrops.length = 0;
   player.x = -18; player.z = 12; vel.x = 0; vel.z = 0;
   relieving = false;
   // wipe last run's leftovers: puddles, flicker, event clock
@@ -755,11 +931,12 @@ function startRun(seed?: number): void {
 function accident(caught = false): void {
   if (caught) return;
   G.wet = true;
-  G.pressure = perkRecovery;
+  G.pressure = Math.min(perkRecovery, pantsNow().recovery);
   G.accidents++;
   toast("...SPLASH. You heard that, didn't you?");
   SFX.splash(); SFX.plop();
   camShake = 0.14;
+  spawnSplash(hero.position.x, hero.position.z);
   for (const s of staff) {
     if (s.floor !== G.floor) continue;
     const d = Math.hypot(hero.position.x - s.x, hero.position.z - s.z);
@@ -775,10 +952,12 @@ function endRun(ending: string): void {
   G.score += bonus;
   const diff = shiftDifficulty(G.seed);
   G.score += (diff - 1) * 12;
-  let rank = 'D';
+  let rank: string = 'D';
   if (G.score >= 110) rank = 'S'; else if (G.score >= 90) rank = 'A'; else if (G.score >= 70) rank = 'B'; else if (G.score >= 50) rank = 'C';
+  G.rank = rank;
+  checkUnlocks();
   sumLbl.textContent =
-    `RUN COMPLETE — seed #${G.seed} (${shiftName(G.seed)}, difficulty ${diff}/5)\n\n${ending}\n\nShift time ${fmt(G.runTime)} · Quota ${G.quota}/3 · Accidents ${G.accidents} · Floors ${G.floors.size}/2\nSCORE ${G.score} — RANK ${rank}\n\n[ press R to run it back — new seed, new store ]`;
+    `RUN COMPLETE — seed #${G.seed} (${shiftName(G.seed)}, difficulty ${diff}/5)\n\n${ending}\n\nShift time ${fmt(G.runTime)} · Quota ${G.quota}/3 · Accidents ${G.accidents} · Floors ${G.floors.size}/2 · Struts ${G.struts}\nSCORE ${G.score} — RANK ${rank}\n\n[ press R to run it back — new seed, new store ]`;
   sumLbl.style.display = 'block';
 }
 
@@ -871,6 +1050,10 @@ window.__cap = {
     perkPickerOpen: perkPicker !== null,
     perks: [...perksTaken],
     runTime: +G.runTime.toFixed(1),
+    strutting, struts: G.struts, rank: G.rank,
+    shoppers: shoppers.length,
+    pants: { key: pantsNow().key, unlocked: [...pantsState.unlocked], equipped: pantsState.equipped },
+    wardrobeOpen,
     inFreezer: isIce(player.x, player.z),
     slippery: isSlippery(player.x, player.z),
     staff: staff.filter((s) => s.floor === G.floor).map((s) => ({ s: s.state, d: +Math.hypot(hero.position.x - s.x, hero.position.z - s.z).toFixed(1) })),
@@ -886,6 +1069,19 @@ window.__cap = {
   floor: (n: number) => { if (n === G.floor) return; G.floor = n; G.floors.add(n); applyAtmos(n); },
   set: (k: string, v: number) => { if (k === 'pressure') { G.pressure = v; if (v >= perkFull) accident(); } if (k === 'closing') G.closing = v; },
   perkForce: () => { if (!perkPicker && G.mode === 'play') showPerkPicker(); },
+  wardrobe: () => { if (wardrobeOpen) closeWardrobe(); else showWardrobe(); },
+  shoppersReact: (t: number) => { for (const s of shoppers) s.nextReact = t; },
+  shoppersNear: (x: number, z: number, n: number) => {
+    for (let i = 0; i < Math.min(n, shoppers.length); i++) {
+      const s = shoppers[i];
+      const a = (i / Math.max(1, n)) * Math.PI * 2;
+      s.x = x + Math.cos(a) * 2; s.z = z + Math.sin(a) * 2; s.tx = s.x; s.tz = s.z;
+      s.obj.position.set(s.x, 0, s.z);
+    }
+  },
+  staffAway: () => {
+    for (const s of staff) if (s.floor === 1) { s.x = 21.5; s.z = 16.5; s.state = 'patrol'; s.wpIdx = 0; s.obj.position.set(s.x, 0, s.z); }
+  },
 };
 window.__pp = window.__cap;
 
@@ -893,6 +1089,7 @@ window.__pp = window.__cap;
 addEventListener('keydown', (e) => {
   if (e.repeat) return;
   if (e.code === 'KeyR') { startRun(); return; }
+  if (e.code === 'KeyB') { if (wardrobeOpen) closeWardrobe(); else if (G.mode === 'play') { showWardrobe(); } return; }
   keys.add(e.code);
 });
 addEventListener('keyup', (e) => keys.delete(e.code));
@@ -942,7 +1139,7 @@ function step(): void {
   const dt = Math.min(0.05, (performance.now() - last) / 1000);
   last = performance.now();
 
-  if (G.mode === 'play' && !perkPaused) {
+  if (G.mode === 'play' && !perkPaused && !wardrobeOpen) {
     G.runTime += dt;
     G.closing -= dt;
     G.coffeeCd -= dt;
@@ -1030,6 +1227,8 @@ function step(): void {
 
     // staff patrols + chase
     for (const s of staff) staffStep(s, dt);
+    for (const s of shoppers) shopperStep(s, dt);
+    splashStep(dt);
 
     // random mess
     eventTimer -= dt;
@@ -1057,9 +1256,19 @@ function step(): void {
       const n = nearest(interactables, player.x, player.z);
       if (n) n.on();
     }
+    if (eNow && !relieving && !strutting) {
+      const n = nearest(interactables, player.x, player.z);
+      if (n?.hold) {
+        if (n.x === strutMirror?.x && n.z === strutMirror?.z) {
+          strutT += dt;
+          if (strutT >= (n.hold as number)) { strutting = true; strutT = 0; strutDoneAt = performance.now(); }
+        } else { strutMirror = { x: n.x, z: n.z }; strutT = 0; }
+      }
+    }
     if (!eNow) relieving = false;
     else if (relieving && !nearest(interactables, player.x, player.z)) relieving = false;
     eHeld = eNow;
+    if (!eNow && strutting) endStrut();
 
     // HUD
     const st = stateIdx();
@@ -1107,6 +1316,13 @@ function step(): void {
     const hop = st === 3 && !relieving && moving ? Math.abs(Math.sin(t * 10)) * 0.045 : 0;
     hero.position.y = hop;
     hero.rotation.z = Math.sin(t * (4 + 8 * urgency)) * urgency * 0.22 * swing;
+    if (strutting) {
+      hero.position.y = Math.abs(Math.sin(t * 9)) * 0.2;
+      hero.rotation.z = Math.sin(t * 9) * 0.5;
+      for (let i = 0; i < 2; i++) arms[i].rotation.x = -2.6 + Math.sin(t * 9 + i * Math.PI) * 0.3;
+      for (let i = 0; i < 2; i++) legs[i].rotation.x = Math.sin(t * 9 + i * Math.PI) * 0.8;
+      if (performance.now() - strutDoneAt > 1600) endStrut();
+    }
 
     // camera tension
     const targetShake = st === 3 ? 0.05 : st === 2 ? 0.015 : 0;
