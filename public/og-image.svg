@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+  <defs>
+    <linearGradient id="floor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#20242e"/>
+      <stop offset="1" stop-color="#14161d"/>
+    </linearGradient>
+    <linearGradient id="shine" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a4150"/>
+      <stop offset="1" stop-color="#20242e"/>
+    </linearGradient>
+  </defs>
+  <!-- store floor + back wall -->
+  <rect width="1200" height="630" fill="url(#floor)"/>
+  <rect x="0" y="0" width="1200" height="210" fill="#1b1e26"/>
+  <!-- fluorescent strips -->
+  <g fill="#e8f0ff" opacity="0.85">
+    <rect x="80" y="42" width="240" height="14" rx="7"/>
+    <rect x="420" y="42" width="240" height="14" rx="7"/>
+    <rect x="760" y="42" width="240" height="14" rx="7"/>
+    <rect x="100" y="88" width="180" height="14" rx="7" opacity="0.5"/>
+    <rect x="560" y="88" width="180" height="14" rx="7" opacity="0.5"/>
+  </g>
+  <!-- shelf silhouettes with product dots -->
+  <g>
+    <rect x="60" y="150" width="430" height="120" rx="10" fill="url(#shine)"/>
+    <rect x="710" y="150" width="430" height="120" rx="10" fill="url(#shine)"/>
+    <g fill="#e67a14"><circle cx="110" cy="190" r="12"/><circle cx="150" cy="180" r="12"/><circle cx="330" cy="200" r="12"/></g>
+    <g fill="#57cc57"><circle cx="210" cy="188" r="12"/><circle cx="250" cy="178" r="12"/><circle cx="820" cy="196" r="12"/></g>
+    <g fill="#e64433"><circle cx="400" cy="176" r="12"/><circle cx="880" cy="178" r="12"/><circle cx="1020" cy="192" r="12"/></g>
+    <g fill="#f2dd4d"><circle cx="130" cy="238" r="12"/><circle cx="360" cy="242" r="12"/><circle cx="760" cy="240" r="12"/></g>
+    <g fill="#33999e"><circle cx="240" cy="240" r="12"/><circle cx="950" cy="236" r="12"/><circle cx="1080" cy="244" r="12"/></g>
+  </g>
+  <!-- hero: cap, black long sleeve, jeans, wet patch -->
+  <g transform="translate(600 585)">
+    <!-- wet jeans pool -->
+    <ellipse cx="0" cy="2" rx="96" ry="16" fill="#1a2c54" opacity="0.55"/>
+    <!-- legs -->
+    <rect x="-44" y="-150" width="34" height="150" rx="14" fill="#3a5a8c"/>
+    <rect x="10" y="-150" width="34" height="150" rx="14" fill="#3a5a8c"/>
+    <!-- THE wet patch: dark on denim, mid-thigh to knee -->
+    <ellipse cx="-27" cy="-72" rx="24" ry="40" fill="#16264a"/>
+    <ellipse cx="27" cy="-66" rx="22" ry="36" fill="#16264a"/>
+    <!-- shoes -->
+    <rect x="-52" y="-14" width="46" height="20" rx="9" fill="#15161b"/>
+    <rect x="6" y="-14" width="46" height="20" rx="9" fill="#15161b"/>
+    <!-- belt + buckle (reference still) -->
+    <rect x="-52" y="-196" width="104" height="16" rx="6" fill="#15161b"/>
+    <rect x="-12" y="-198" width="24" height="20" rx="4" fill="#f2f2ee"/>
+    <!-- torso -->
+    <rect x="-48" y="-330" width="96" height="140" rx="26" fill="#15161b"/>
+    <!-- clasped hands in front, that walk -->
+    <circle cx="0" cy="-212" r="16" fill="#e0b894"/>
+    <circle cx="-14" cy="-206" r="14" fill="#e0b894"/>
+    <circle cx="14" cy="-206" r="14" fill="#e0b894"/>
+    <!-- head + cap -->
+    <circle cx="0" cy="-362" r="34" fill="#e0b894"/>
+    <rect x="-36" y="-402" width="72" height="20" rx="9" fill="#15161b"/>
+    <rect x="-14" y="-392" width="52" height="14" rx="7" fill="#15161b"/>
+  </g>
+  <!-- motion lines behind the hero -->
+  <g stroke="#cdd6e4" stroke-width="7" stroke-linecap="round" opacity="0.5">
+    <line x1="720" y1="420" x2="800" y2="420"/>
+    <line x1="740" y1="460" x2="840" y2="460"/>
+    <line x1="726" y1="500" x2="812" y2="500"/>
+  </g>
+  <!-- caution tape -->
+  <g transform="rotate(-3 600 296)">
+    <rect x="-20" y="252" width="1240" height="58" fill="#f2c40e"/>
+    <g fill="#15161b" font-family="Arial Black, DejaVu Sans, sans-serif" font-size="34" font-weight="900" letter-spacing="4">
+      <text x="30" y="292">PERÄINNES OSAKAUPPA · PRISMA PANIC · PERÄINNES OSAKAUPPA · PRISMA PANIC · PRISMA PA</text>
+    </g>
+  </g>
+  <!-- title block -->
+  <g font-family="Arial Black, DejaVu Sans, sans-serif" text-anchor="middle">
+    <text x="600" y="475" font-size="118" font-weight="900" fill="#f4e878" letter-spacing="6">PRISMA PANIC</text>
+    <text x="600" y="475" font-size="118" font-weight="900" fill="none" stroke="#15161b" stroke-width="3" letter-spacing="6" opacity="0.9">PRISMA PANIC</text>
+    <text x="600" y="545" font-size="34" font-weight="700" fill="#cdd6e4" letter-spacing="2">THE STORE CLOSES WHEN THE PANTS DECIDE.</text>
+    <text x="600" y="602" font-size="31" font-weight="700" fill="#aab8c6" letter-spacing="1">A third-person supermarket roguelike · your bladder is the health bar</text>
+  </g>
+</svg>
