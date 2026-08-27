@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="icon" href="data:," />
+<title>PRISMA PANIC — the store closes when the pants decide</title>
+<style>
+  html, body { margin:0; height:100%; overflow:hidden; background:#11131a;
+    font-family:"Segoe UI", system-ui, sans-serif; }
+  #hud { position:fixed; inset:0; pointer-events:none; color:#e8ecf2;
+    font-size:15px; text-shadow:0 1px 4px #000, 0 0 14px #000; }
+  .bar { position:absolute; left:24px; bottom:52px; width:340px; height:26px;
+    background:#0e0f14cc; border:1px solid #ffffff22; border-radius:5px; overflow:hidden; }
+  .barfill { height:100%; width:10%; background:#57cc57; transition:width .12s linear; }
+  .lbl { position:absolute; letter-spacing:.4px; }
+  .state { left:24px; bottom:84px; font-size:18px; font-weight:600; }
+  .clock { top:14px; left:24px; font-size:15px; }
+  .hint { bottom:22vh; left:50%; transform:translateX(-50%); font-size:19px;
+    background:#0e0f14b3; padding:5px 16px; border-radius:7px; white-space:nowrap; }
+  .wet { bottom:34vh; left:50%; transform:translateX(-50%); font-size:30px;
+    font-weight:800; letter-spacing:6px; color:#8ecbffcc; }
+  .toast { position:absolute; top:64px; left:50%; transform:translateX(-50%);
+    font-size:19px; opacity:0; text-align:center; max-width:72vw; }
+  .summary { top:50%; left:50%; transform:translate(-58%,-50%); width:560px;
+    text-align:center; font-size:21px; line-height:1.75;
+    background:#0b0c11ef; border:1px solid #ffffff14; border-radius:14px;
+    padding:34px 30px; }
+</style>
+</head>
+<body>
+<div id="hud"></div>
+<script type="module" src="./src/main.ts"></script>
+</body>
+</html>
