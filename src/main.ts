@@ -37,6 +37,11 @@ const G = {
   seed: 4271,
   struts: 0,           // M4: dignity events
   rank: '',            // last run's rank (S/A/B/C/D)
+  // M7: shift-report story facts (how THIS run actually went)
+  legendSeen: false,   // witnessed the Prisma-incident re-enactment
+  spooks: 0,           // times staff spotted you
+  sheds: 0,            // chases you shook off by crouching out of sight
+  crouchT: 0,          // seconds spent fake-shopping
 };
 declare global { interface Window { __cap: any; __pp: any } }
 
@@ -692,6 +697,7 @@ function spooked(s: Staff, why: string): void {
   if (s.state !== 'chase') {
     s.state = 'chase';
     s.t = 4.2;
+    G.spooks++;
     toast(`Staff: "${why}"`);
     SFX.alarm();
   }
@@ -858,6 +864,7 @@ function legendStep(dt: number): void {
   const hd = Math.hypot(hero.position.x - legend.obj.position.x, hero.position.z - legend.obj.position.z);
   if (hd < 10 && !legend.seen) {
     legend.seen = true;
+    G.legendSeen = true;
     G.score += 15;
     G.pressure = Math.max(0, G.pressure - 5);
     toast('You witness the incident. The legend is real. Your bladder relaxes slightly. (+15)');
@@ -1029,6 +1036,7 @@ function startRun(seed?: number): void {
   G.pressure = 10; G.wet = false; G.runTime = 0; G.closing = 240 + Math.random() * 120;
   G.quota = 0; G.accidents = 0; G.score = 0; G.coffeeCd = 0;
   G.mods = []; G.toasts = []; G.ending = '';
+  G.legendSeen = false; G.spooks = 0; G.sheds = 0; G.crouchT = 0; // M7: story facts
   tutorialIdx = tutorialSeen ? TUTORIAL.length : 0;
   perkCoffee = 12; perkRecovery = 35; perkSprint = 0; perkSqueak = 11; perkFull = FULL;
   perksTaken.length = 0;
@@ -1079,6 +1087,51 @@ function accident(caught = false): void {
     if (d < 9) staffHear(s, hero.position.x, hero.position.z, '...was that a PEEING?');
   }
 }
+// ---------- M7: The Shift Report — the run ends as a story, not a stat row ----------
+// MTV-Uutiset voice: a local news desk reporting on one very specific shift.
+// Every line is earned by how THIS run actually went (story facts tracked on G).
+function shiftReport(ending: string, rank: string): string {
+  const L: string[] = [];
+  const wet = G.wet, acc = G.accidents, caught = ending.startsWith('CAUGHT');
+  const closed = ending.startsWith('STORE CLOSED');
+  const clean = ending.startsWith('CLEAN');
+  const wetExit = ending.startsWith('WET EXIT');
+  const quotaDone = G.quota >= G.quotaTotal;
+
+  if (caught) L.push('Local supermarket confirms a man was apprehended after a "code peed". Witnesses say he "wasn\'t even shopping hard enough."');
+  else if (closed) L.push('The lights went out mid-strut. Security describes the aftermath as "deli counter, one man, zero dignity."');
+  else if (clean && quotaDone) L.push('The man completed the entire quota, left through the car, and did not stop. Employees say they "still don\'t know how he did it."');
+  else if (wetExit) L.push('A customer was seen fleeing to the parking deck. The drive was, in the words of one cashier, "tanked."');
+  else if (acc === 0 && quotaDone) L.push('A customer quietly completed the task and left. No one saw. That is the whole story, and it is beautiful.');
+  else L.push('A man spent the entire shift looking for something. He was never, once, actually shopping. The store has been informed.');
+
+  if (acc >= 2) L.push(`Sources confirm at least ${acc} separate wet-pants incidents on one pair of jeans. "He just kept going," one employee said.`);
+  else if (acc === 1) L.push('One accident was confirmed. The jeans have been retired to the staff room and named.');
+  else if (!wet) L.push('Notably, the jeans stayed dry. "He really did not need it to happen there," said a witness who had to leave.');
+
+  if (G.sheds >= 2) L.push('The man was repeatedly seen ducking behind cereal and "becoming the nutrition label." Security could not prove what they were seeing.');
+  else if (G.sheds === 1) L.push('The man crouched once, broke line of sight, and was not found. The aisle is under review.');
+  if (G.spooks >= 2) L.push(`Staff called out "${G.spooks} times" during the shift. One said the word "security" enough to need a water break.`);
+  else if (G.spooks === 1) L.push('A staff member asked "why is this man sprinting?" exactly once. It is now store folklore.');
+
+  if (G.legendSeen) L.push('In a rare sighting, the customer witnessed the 2020 incident re-enacted in the stockroom. "It was real," they said. "My bladder relaxed."');
+  if (G.struts >= 1) L.push(`The man ${G.struts === 1 ? 'performed a confident strut' : `performed ${G.struts} confident struts`} in front of a mirror. ${G.wet ? 'The pants were soaked. The walk did not care.' : 'Dignity, briefly, was restored.'}`);
+  if (G.crouchT >= 8) L.push('The man spent a measurable amount of time crouched among the shelves, "buying seconds." The register did not see the sale.');
+  if (G.floors.size >= 2 && !caught) L.push('The man moved between the market hall and the parking deck. The elevators have filed a report.');
+
+  const grade =
+    rank === 'S' ? 'The desk gives this shift an S. "We will be remembering this one."' :
+    rank === 'A' ? 'The desk gives this shift an A. Competent, if slightly damp.' :
+    rank === 'B' ? 'The desk gives this shift a B. It happened. Everyone is over it.' :
+    rank === 'C' ? 'The desk gives this shift a C. "We could have gone either way."' :
+    'The desk gives this shift a D. "There will be a follow-up."';
+  L.push(grade);
+
+  return `<div class="report"><div class="reporthead">THE SHIFT REPORT</div>` +
+    L.map((t) => `<div class="reportline">${t}</div>`).join('') +
+    `</div>`;
+}
+
 function endRun(ending: string): void {
   if (G.mode !== 'play') return;
   G.mode = 'end';
@@ -1096,11 +1149,12 @@ function endRun(ending: string): void {
   if (G.score >= 110) rank = 'S'; else if (G.score >= 90) rank = 'A'; else if (G.score >= 70) rank = 'B'; else if (G.score >= 50) rank = 'C';
   G.rank = rank;
   checkUnlocks();
-  const pb = (() => { let best = 0; try { best = parseInt(localStorage.getItem('pp_best') || '0', 10) || 0; } catch { /* */ } const isPB = G.score > best; if (isPB) { try { localStorage.setItem('pp_best', String(G.score)); } catch { /* */ } } return { best: isPB ? G.score : best, isPB }; })();
+  const pb = (() => { let best = 0; try { best = parseInt(localStorage.getItem('pp_best') || '0') || 0; } catch { /* */ } const isPB = G.score > best; if (isPB) { try { localStorage.setItem('pp_best', String(G.score)); } catch { /* */ } } return { best: isPB ? G.score : best, isPB }; })();
   sumLbl.innerHTML =
     `<div style="font-size:14px; letter-spacing:3px; color:#8ecbffcc;">RUN COMPLETE — ${shiftName(G.seed)} SHIFT · DIFFICULTY ${diff}/5</div>` +
     `<div class="rank r${rank}">${rank}</div>` +
     `<div class="endingline">${ending}</div>` +
+    shiftReport(ending, rank) +
     `<div class="statrow"><span>Shift time</span><b>${fmt(G.runTime)}</b></div>` +
     `<div class="statrow"><span>Quota</span><b>${G.quota}/3</b></div>` +
     `<div class="statrow"><span>Accidents</span><b>${G.accidents}</b></div>` +
@@ -1144,6 +1198,7 @@ function staffStep(s: Staff, dt: number): void {
     else { s.lostClear += dt; if (s.lostClear > 0.2) s.lostT = 0; }
     if (s.lostT > 1.5) {
       s.state = 'alert'; s.t = 5; s.lostT = 0; s.wpIdx = s.wp.length;
+      G.sheds++;
       toast('The guard stops and looks around. You are a cereal aisle. You are the nutrition label.');
     }
   }
@@ -1282,6 +1337,13 @@ window.__cap = {
     const c = (m as THREE.MeshStandardMaterial).color;
     return [Math.round(c.r * 255), Math.round(c.g * 255), Math.round(c.b * 255)];
   },
+  // M7: shift-report probing — set story facts, force-end, read the rendered report
+  facts: (o: Record<string, number | boolean | Set<number>>) => { Object.assign(G, o); },
+  finish: (ending: string) => { if (G.mode === 'play') endRun(ending); },
+  report: () => ({
+    head: !!document.querySelector('.reporthead'),
+    lines: Array.from(document.querySelectorAll('.reportline')).map((el) => el.textContent || ''),
+  }),
 };
 window.__pp = window.__cap;
 
@@ -1560,6 +1622,7 @@ function step(): void {
     hero.position.lerp(new THREE.Vector3(player.x, 0, player.z), Math.min(1, 24 * dt));
     // M6: fake-shopping — the hero actually ducks: squish + forward lean (shelves read crouchScale)
     crouchScale += ((crouching ? 0.55 : 1) - crouchScale) * Math.min(1, 8 * dt);
+    if (isCrouched()) G.crouchT += dt; // M7: story fact — seconds spent pretending to shop
     hero.scale.y = crouchScale;
     hero.rotation.x = (1 - crouchScale) * 0.85;
     const hop = st === 3 && !relieving && moving ? Math.abs(Math.sin(t * 10)) * 0.045 : 0;

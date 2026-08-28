@@ -123,6 +123,7 @@ are the character.
 | 5 | Polish — Blender hero model (cap/jeans/belt per reference), lighting pass, sound design pass, juice (screen shake, hit-stop on splash), run summary screen, tutorial moments | **DONE** (M5) |
 | 6 | **Pressure interlocks** — sprinting costs bladder (bouncy legs fill faster), panic fill when hunted (staff alert +0.5 / chase +1.3 tiers, the GDD's "panic (being spotted)" pillar), the loop closes: every escape tool is itself pressure | **DONE** (M6a) |
 | 7 | **Fake-shopping (crouch/sneak)** — hold C: slow walk, bladder buys seconds (−0.4/s), forward-lean + knee-bend duck animation, real line-of-sight vs shelf geometry (a crouched hero is a cereal aisle), patrol spook range shrinks, break LOS 1.5s behind cover to shed a chase. The counterweight: sprint costs, hiding buys | **DONE** (M6b) |
+| 8 | **The Shift Report** — the run ends as a story, not a stat row: a deadpan local-news report whose every line is earned by how THIS shift actually went (lead-in per ending, accident tally, shed/spook folklore, the legend sighting, struts, fake-shopping minutes, both-floors travel) + a desk grade per rank. The GDD's last "Memorable" pillar: a run that ends in a story | **DONE** (M7) |
 
 **Build order discipline:** fun mechanic > playable prototype > game feel > polish > content.
 A feature that doesn't make the bladder loop more interesting gets cut.
