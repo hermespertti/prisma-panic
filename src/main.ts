@@ -81,6 +81,7 @@ const TUTORIAL: [number, string][] = [
   [50, 'Sprint hard through the EAST doorway to reach the parking deck. Your getaway car is there.'],
   [64, 'B = wardrobe. Hold E at a mirror = The Strut. And if you see a man standing very still... that\'s the legend.'],
   [80, 'When staff spot you, your bladder joins the chase — being hunted fills you. Panic is a resource too.'],
+  [96, 'Hold C to crouch. You get slow, your bladder buys seconds, and behind a shelf you are nobody. Fake-shop with me.'],
 ];
 let tutorialIdx = 0, tutorialSeen = false;
 try { tutorialSeen = localStorage.getItem('pp_tutorial_done') === '1'; } catch { /* first visit */ }
@@ -618,7 +619,7 @@ type Staff = {
   x: number; z: number; yaw: number; floor: number;
   state: 'patrol' | 'alert' | 'chase' | 'return';
   wp: [number, number][]; wpIdx: number;
-  speed: number; t: number; phase: number; lastSqueak: number;
+  speed: number; t: number; phase: number; lastSqueak: number; lostT: number; lostClear: number;
 };
 const staffMat = new THREE.MeshStandardMaterial({ color: 0xf4f1e6, roughness: 0.85 });
 const visorMat = new THREE.MeshStandardMaterial({ color: 0xf2c40e, roughness: 0.6 });
@@ -629,7 +630,7 @@ function makeStaff(floor: number, x: number, z: number, wp: [number, number][], 
   mk(new THREE.CylinderGeometry(0.19, 0.19, 0.05, 12), visorMat, 0, 1.98, 0, g);
   const st: Staff = {
     obj: g, legs: [], x, z, yaw: 0, floor,
-    state: 'patrol', wp, wpIdx: 0, speed: 2.6, t: 0, phase: Math.random() * 6, lastSqueak: 0,
+    state: 'patrol', wp, wpIdx: 0, speed: 2.6, t: 0, phase: Math.random() * 6, lastSqueak: 0, lostT: 0, lostClear: 0,
   };
   for (const s of [-1, 1]) {
     const leg = new THREE.Group(); leg.position.set(s * 0.14, 0.7, 0); g.add(leg);
@@ -659,6 +660,25 @@ function deckPatrolAnchors(seed: number): [number, number][] {
   return out;
 }
 let staff: Staff[] = [];
+// M6: real line of sight — shelves/cars actually block the staff's view
+// (only consulted when you're crouched; standing keeps the old far-see model)
+function staffLos(s: Staff): boolean {
+  const hx = hero.position.x, hz = hero.position.z;
+  const d = Math.hypot(hx - s.x, hz - s.z);
+  if (d < 0.5) return true;
+  const sy = 1.7, hy = 1.5 * crouchScale; // eyes -> head (crouched head is low)
+  const solids = floorCamSolids[s.floor - 1];
+  const steps = Math.min(40, Math.ceil(d / 0.5));
+  for (let i = 1; i < steps; i++) {
+    const t = i / steps;
+    const x = s.x + (hx - s.x) * t, z = s.z + (hz - s.z) * t;
+    const y = sy + (hy - sy) * t;
+    for (const b of solids) {
+      if (Math.abs(x - b.x) < b.hx && Math.abs(z - b.z) < b.hz && y > b.y0 && y < b.y1) return false;
+    }
+  }
+  return true;
+}
 const staffSeen = (s: Staff): boolean => {
   const dx = hero.position.x - s.x, dz = hero.position.z - s.z;
   const d = Math.hypot(dx, dz);
@@ -690,6 +710,9 @@ const player = { x: -18, z: 12, r: 0.36 };
 const vel = { x: 0, z: 0 };
 let camYaw = -Math.PI / 2, camShake = 0, hitStop = 0;
 let walkPhase = 0, relieving = false, heartbeatT = 0, dripT = 0, squeakT = 0, eHeld = false;
+let crouching = false, crouchScale = 1; // M6: fake-shopping — crouch to duck behind shelves
+let crouchToasted = false;
+const isCrouched = () => crouchScale < 0.85; // visually ducked (covers the lerp)
 let clock = 240 + Math.random() * 120;
 const keys = new Set<string>();
 const SPEED = 4.6, SPRINT = 7.4;
@@ -1016,7 +1039,7 @@ function startRun(seed?: number): void {
   // reset staff: a chaser left mid-chase would insta-catch the respawned hero
   for (const s of staff) {
     const wp0 = s.wp[0];
-    s.x = wp0[0]; s.z = wp0[1]; s.state = 'patrol'; s.wpIdx = 0; s.t = 0;
+    s.x = wp0[0]; s.z = wp0[1]; s.state = 'patrol'; s.wpIdx = 0; s.t = 0; s.lostT = 0; s.lostClear = 0;
     s.obj.position.set(s.x, 0, s.z);
   }
   for (const d of splashDrops) { d.m.parent?.remove(d.m); (d.m.material as THREE.Material).dispose(); }
@@ -1029,6 +1052,7 @@ function startRun(seed?: number): void {
   spillZones[0].length = 0; spillZones[1].length = 0;
   flickerOn = false; flickerT = 0;
   panicOn = false;
+  crouching = false; crouchScale = 1; crouchToasted = false;
   eventTimer = 24 + Math.random() * 16;
   buildSeedLayout(G.seed);
   buildInteractables();
@@ -1096,9 +1120,10 @@ function staffStep(s: Staff, dt: number): void {
     performance.now() - s.lastSqueak > 2500;
   if (heardSqueak) s.lastSqueak = performance.now();
   if (s.state === 'patrol') {
-    if (heroD < 7 && staffSeen(s) && (G.wet || Math.hypot(vel.x, vel.z) > 5)) {
+    const seeRange = isCrouched() ? 4 : 7; // fake-shopping: a hunched shopper is easy to miss
+    if (heroD < seeRange && staffSeen(s) && (G.wet || Math.hypot(vel.x, vel.z) > 5)) {
       spooked(s, G.wet ? 'SECURITY! WE HAVE A CODE PEED!' : 'Why is this man SPRINTING?');
-    } else if (G.wet && heroD < 4.5) {
+    } else if (G.wet && heroD < (isCrouched() ? 3 : 4.5)) {
       spooked(s, 'SECURITY! WE HAVE A CODE PEED!');
     } else if (heardSqueak && heroD < perkSqueak) {
       staffHear(s, player.x, player.z, s.floor === 2 ? '...squeak... on my deck...' : '...squeak squeak squeak...');
@@ -1112,6 +1137,14 @@ function staffStep(s: Staff, dt: number): void {
     if (heroD < 1.15 && G.mode === 'play') {
       SFX.alarm();
       endRun('CAUGHT — staff arms themself with body glue and wet-floor signs');
+    }
+    // M6: fake-shopping — crouch and break line of sight, and the guard loses you
+    // (hysteresis: a momentary LOS flicker at a shelf edge doesn't reset the clock)
+    if (isCrouched() && !staffLos(s)) { s.lostT += dt; s.lostClear = 0; }
+    else { s.lostClear += dt; if (s.lostClear > 0.2) s.lostT = 0; }
+    if (s.lostT > 1.5) {
+      s.state = 'alert'; s.t = 5; s.lostT = 0; s.wpIdx = s.wp.length;
+      toast('The guard stops and looks around. You are a cereal aisle. You are the nutrition label.');
     }
   }
   let tx = s.x, tz = s.z;
@@ -1190,7 +1223,8 @@ window.__cap = {
     inFreezer: isIce(player.x, player.z),
     slippery: isSlippery(player.x, player.z),
     panic: panicOn,
-    staff: staff.filter((s) => s.floor === G.floor).map((s) => ({ s: s.state, d: +Math.hypot(hero.position.x - s.x, hero.position.z - s.z).toFixed(1) })),
+    crouching: isCrouched(),
+    staff: staff.filter((s) => s.floor === G.floor).map((s) => ({ s: s.state, d: +Math.hypot(hero.position.x - s.x, hero.position.z - s.z).toFixed(1), lost: +s.lostT.toFixed(2) })),
     toasts: [...G.toasts], ending: G.ending,
     summary: (document.querySelector('.summary') as HTMLElement)?.textContent || '',
   }),
@@ -1216,14 +1250,27 @@ window.__cap = {
   staffAway: () => {
     for (const s of staff) if (s.floor === 1) { s.x = 21.5; s.z = 16.5; s.state = 'patrol'; s.wpIdx = 0; s.obj.position.set(s.x, 0, s.z); }
   },
-  staffChase: () => {
+  staffChase: (dx = 10, dz = 0) => {
     for (const s of staff) if (s.floor === 1) {
-      s.x = player.x + 10; s.z = player.z;
+      s.x = player.x + dx; s.z = player.z + dz;
       s.state = 'chase'; s.t = 999; s.obj.position.set(s.x, 0, s.z);
     }
   },
+  staffPos: () => staff.filter((s) => s.floor === 1).map((s) => [ +s.x.toFixed(2), +s.z.toFixed(2) ]),
+  staffChaseAt: (pts: [number, number][]) => {
+    const f1 = staff.filter((s) => s.floor === 1);
+    f1.forEach((s, i) => {
+      const p = pts[i] || pts[pts.length - 1];
+      s.x = p[0]; s.z = p[1]; s.state = 'chase'; s.t = 999; s.obj.position.set(s.x, 0, s.z);
+    });
+  },
   staffPatrol: () => {
     for (const s of staff) if (s.floor === 1) { s.state = 'patrol'; s.t = 0; s.wpIdx = 0; }
+  },
+  staffLos: () => staff.filter((s) => s.floor === 1).map((s) => staffLos(s)),
+  heroMesh: () => [ +hero.position.x.toFixed(2), +hero.position.z.toFixed(2) ],
+  staffPin: (x: number, z: number) => {
+    for (const s of staff) if (s.floor === 1) { s.x = x; s.z = z; s.state = 'patrol'; s.wpIdx = 0; s.lostT = 0; s.lostClear = 0; s.obj.position.set(x, 0, z); }
   },
   staffAlert: () => {
     for (const s of staff) if (s.floor === 1) { s.state = 'alert'; s.t = 999; }
@@ -1320,13 +1367,22 @@ function step(): void {
       if (keys.has('KeyD') || keys.has('ArrowRight')) mx += 1;
     }
     const moving = mx !== 0 || mz !== 0;
-    let sp = sprinting && moving ? SPRINT + perkSprint : SPEED;
+    // M6: fake-shopping — hold C to crouch. slower, no sprint, but staff lose you
+    crouching = !sprinting && (keys.has('KeyC') || keys.has('ControlLeft'));
+    if (crouching && !crouchToasted && G.runTime > 8) { crouchToasted = true; toast('You crouch behind a cereal endcap, pretending to read the nutrition label. Your bladder pretends not to exist.'); }
+    let sp = sprinting && moving ? SPRINT + perkSprint : crouching ? SPEED * 0.45 : SPEED;
     if (G.wet) sp *= 0.88;
     // M6: sprinting bounces the bladder — speed is a cost on every axis
     if (sprinting && moving) {
       if (!G.mods.includes(0.8)) G.mods.push(0.8);
     } else {
       delMod(0.8);
+    }
+    // M6: fake-shopping — crouched and pretending = the bladder buys seconds
+    if (isCrouched()) {
+      if (!G.mods.includes(-0.4)) G.mods.push(-0.4);
+    } else {
+      delMod(-0.4);
     }
     const onIce = isSlippery(player.x, player.z);
     if (moving) {
@@ -1494,13 +1550,18 @@ function step(): void {
     const urgency = THREE.MathUtils.clamp((G.pressure - 30) / 70, 0, 1);
     const sp2 = Math.hypot(vel.x, vel.z);
     const swing = THREE.MathUtils.clamp(sp2 / SPEED, 0, 1.3);
+    const crouchBend = 1 - crouchScale; // 0 standing, ~0.45 crouched (M6 fake-shopping)
     for (let i = 0; i < 2; i++) {
-      legs[i].rotation.x = Math.sin(walkPhase) * 0.55 * swing * (i ? -1 : 1);
-      arms[i].rotation.x = -Math.sin(walkPhase) * 0.5 * swing * (i ? -1 : 1);
+      legs[i].rotation.x = Math.sin(walkPhase) * 0.55 * swing * (i ? -1 : 1) + crouchBend * 0.9;
+      arms[i].rotation.x = -Math.sin(walkPhase) * 0.5 * swing * (i ? -1 : 1) + crouchBend * 0.45;
     }
     const t = performance.now() / 1000;
     hero.rotation.y = THREE.MathUtils.lerp(hero.rotation.y, Math.atan2(vel.x, vel.z), Math.min(1, 12 * dt));
     hero.position.lerp(new THREE.Vector3(player.x, 0, player.z), Math.min(1, 24 * dt));
+    // M6: fake-shopping — the hero actually ducks: squish + forward lean (shelves read crouchScale)
+    crouchScale += ((crouching ? 0.55 : 1) - crouchScale) * Math.min(1, 8 * dt);
+    hero.scale.y = crouchScale;
+    hero.rotation.x = (1 - crouchScale) * 0.85;
     const hop = st === 3 && !relieving && moving ? Math.abs(Math.sin(t * 10)) * 0.045 : 0;
     hero.position.y = hop;
     hero.rotation.z = Math.sin(t * (4 + 8 * urgency)) * urgency * 0.22 * swing;
@@ -1526,7 +1587,7 @@ function step(): void {
   const dist = camRig.dist + stateIdx() * 0.12;
   const cp = Math.cos(camRig.pitch);
   const sinp = Math.sin(camRig.pitch);
-  const hx = hero.position.x, hy = hero.position.y + 1.5, hz = hero.position.z;
+  const hx = hero.position.x, hy = hero.position.y + 1.5 * crouchScale, hz = hero.position.z;
   let bx = Math.sin(camYaw), bz = Math.cos(camYaw);
   let placed = false;
   for (let i = 10; i >= 1; i--) {
@@ -1543,7 +1604,7 @@ function step(): void {
     const cy = hy - 0.12;
     camera.position.set(hx + bx * 2.2, Math.max(cy, floorY(hx + bx * 2.2, hz + bz * 2.2) + 0.25), hz + bz * 2.2);
   }
-  camera.lookAt(hero.position.x, hero.position.y + 1.15, hero.position.z);
+  camera.lookAt(hero.position.x, hero.position.y + 1.15 * crouchScale, hero.position.z);
 
   renderer.render(scene, camera);
   requestAnimationFrame(step);
