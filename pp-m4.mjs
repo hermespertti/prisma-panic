@@ -49,7 +49,7 @@ console.log('    (picked from: ' + picked.names.map((n) => n.split('—')[0].tri
 await page.evaluate(() => { window.__cap.set('pressure', 100); window.__cap.set('closing', 1); });
 await new Promise((r) => setTimeout(r, 1500));
 s = await st();
-ok(s.mode === 'end' && /RANK [SABCD]/.test(s.summary || ''), `run ends with ranked score (summary: ${(s.summary || '').split('\n').slice(-2).join(' | ')})`);
+ok(s.mode === 'end' && /^[SABCD]$/.test(s.rank || '') && /SCORE/.test(s.summary || ''), `run ends with ranked score (rank=${s.rank}, summary visible)`);
 
 if (errs.length) console.log('  console errors:\n    ' + errs.slice(0, 3).join('\n    '));
 console.log(`\n${pass} pass / ${fail} fail`);

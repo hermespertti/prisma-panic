@@ -1035,8 +1035,19 @@ function endRun(ending: string): void {
   if (G.score >= 110) rank = 'S'; else if (G.score >= 90) rank = 'A'; else if (G.score >= 70) rank = 'B'; else if (G.score >= 50) rank = 'C';
   G.rank = rank;
   checkUnlocks();
-  sumLbl.textContent =
-    `RUN COMPLETE — seed #${G.seed} (${shiftName(G.seed)}, difficulty ${diff}/5)\n\n${ending}\n\nShift time ${fmt(G.runTime)} · Quota ${G.quota}/3 · Accidents ${G.accidents} · Floors ${G.floors.size}/2 · Struts ${G.struts}\nSCORE ${G.score} — RANK ${rank}\n\n[ press R to run it back — new seed, new store ]`;
+  const pb = (() => { let best = 0; try { best = parseInt(localStorage.getItem('pp_best') || '0', 10) || 0; } catch { /* */ } const isPB = G.score > best; if (isPB) { try { localStorage.setItem('pp_best', String(G.score)); } catch { /* */ } } return { best: isPB ? G.score : best, isPB }; })();
+  sumLbl.innerHTML =
+    `<div style="font-size:14px; letter-spacing:3px; color:#8ecbffcc;">RUN COMPLETE — ${shiftName(G.seed)} SHIFT · DIFFICULTY ${diff}/5</div>` +
+    `<div class="rank r${rank}">${rank}</div>` +
+    `<div class="endingline">${ending}</div>` +
+    `<div class="statrow"><span>Shift time</span><b>${fmt(G.runTime)}</b></div>` +
+    `<div class="statrow"><span>Quota</span><b>${G.quota}/3</b></div>` +
+    `<div class="statrow"><span>Accidents</span><b>${G.accidents}</b></div>` +
+    `<div class="statrow"><span>Floors touched</span><b>${G.floors.size}/2</b></div>` +
+    `<div class="statrow"><span>Struts</span><b>${G.struts}</b></div>` +
+    `<div class="statrow" style="font-size:19px; border:none; padding-top:12px;"><span>SCORE</span><b>${G.score}</b></div>` +
+    (pb.isPB ? '<div class="pb">★ NEW PERSONAL BEST ★</div>' : `<div class="pb" style="color:#cfd3da77;">personal best ${pb.best}</div>`) +
+    `<div style="margin-top:14px; font-size:14px; color:#8ecbffcc;">[ press R to run it back — new seed, new store ]</div>`;
   sumLbl.style.display = 'block';
 }
 
