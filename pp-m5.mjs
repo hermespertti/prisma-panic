@@ -83,6 +83,9 @@ await page.evaluate(() => { window.__cap.legend(); });
 await sleep(400);
 s = await st();
 ok(s.legendActive === true && s.legendPos, `the legend appears (at ${JSON.stringify(s.legendPos)})`);
+// spawn spooks nearby staff into chase — move them away before teleporting on top of the legend
+await page.evaluate(() => { window.__cap.staffAway(); });
+await sleep(200);
 await page.evaluate((p) => window.__cap.teleport(p.x, p.z), (await st()).legendPos);
 await sleep(600);
 s = await st();
@@ -90,12 +93,15 @@ const sawIt = s.toasts.some((t) => /witness the incident|legend is real/.test(t)
 ok(sawIt || s.score > legendBefore, `witnessing the legend pays (toasts: ${JSON.stringify(s.toasts.slice(-2))})`);
 // poll for departure (dt-cap means game-time runs slower than wall-time under load)
 let departed = false;
-for (let i = 0; i < 40; i++) {
+const traj = [];
+for (let i = 0; i < 75; i++) {
   await sleep(400);
-  if (!(await st()).legendActive) { departed = true; break; }
+  const q = await st();
+  if (i % 6 === 0) traj.push(`t+${((i + 1) * 0.4).toFixed(1)}s mode=${q.mode} rt=${(q.runTime || 0).toFixed(1)} close=${q.closing} wet=${q.wet} legend=${q.legendActive}`);
+  if (!q.legendActive) { departed = true; break; }
 }
 s = await st();
-ok(departed && s.legendActive === false, 'the legend departs');
+ok(departed && s.legendActive === false, `the legend departs (mode=${s.mode} rt=${s.runTime} close=${s.closing} legendActive=${s.legendActive}) ${traj.join(' | ')}`);
 const pants = await page.evaluate(() => JSON.parse(localStorage.getItem('pp_pants_v1') || '{}'));
 ok(pants.equipped && Array.isArray(pants.unlocked), `wardrobe persists to localStorage (equipped=${pants.equipped}, unlocked=${(pants.unlocked || []).join(',')})`);
 

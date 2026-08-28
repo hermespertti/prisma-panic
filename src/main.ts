@@ -71,6 +71,29 @@ function toast(msg: string): void {
   toastT = 3.2;
 }
 
+// ---------- first-run tutorial (once, per browser) ----------
+const TUTORIAL: [number, string][] = [
+  [1, 'WASD to move, mouse to look, Shift to sprint. Sprinting fills your bladder faster — that\'s the deal.'],
+  [10, 'The yellow bar is your bladder. It fills all the time. Full bar = ...an event.'],
+  [22, 'Orange cubes are quota items. Grab all 3 — the store will offer you "benefits" along the way.'],
+  [36, 'Toilets are the only safe spot, and standing there is vulnerable. The STAFF toilet is legally risky.'],
+  [50, 'Sprint hard through the EAST doorway to reach the parking deck. Your getaway car is there.'],
+  [64, 'B = wardrobe. Hold E at a mirror = The Strut. And if you see a man standing very still... that\'s the legend.'],
+];
+let tutorialIdx = 0, tutorialSeen = false;
+try { tutorialSeen = localStorage.getItem('pp_tutorial_done') === '1'; } catch { /* first visit */ }
+function tutorialStep(dt: number): void {
+  if (tutorialSeen || G.mode !== 'play') return;
+  if (tutorialIdx < TUTORIAL.length && G.runTime >= TUTORIAL[tutorialIdx][0]) {
+    toast(TUTORIAL[tutorialIdx][1]);
+    tutorialIdx++;
+  }
+  if (tutorialIdx >= TUTORIAL.length) {
+    tutorialSeen = true;
+    try { localStorage.setItem('pp_tutorial_done', '1'); } catch { /* private mode */ }
+  }
+}
+
 // ---------- perks: quota items turn into weird power ----------
 const PERKS: Record<string, { name: string; desc: string; apply: () => void }> = {
   diuretic: {
@@ -146,6 +169,8 @@ renderer.setPixelRatio(Math.min(2, devicePixelRatio));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.12;
 document.body.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x11131a);
@@ -628,7 +653,7 @@ function staffHear(s: Staff, x: number, z: number, why: string): void {
 // ---------- run state ----------
 const player = { x: -18, z: 12, r: 0.36 };
 const vel = { x: 0, z: 0 };
-let camYaw = -Math.PI / 2, camShake = 0;
+let camYaw = -Math.PI / 2, camShake = 0, hitStop = 0;
 let walkPhase = 0, relieving = false, heartbeatT = 0, dripT = 0, squeakT = 0, eHeld = false;
 let clock = 240 + Math.random() * 120;
 const keys = new Set<string>();
@@ -945,12 +970,19 @@ function startRun(seed?: number): void {
   G.pressure = 10; G.wet = false; G.runTime = 0; G.closing = 240 + Math.random() * 120;
   G.quota = 0; G.accidents = 0; G.score = 0; G.coffeeCd = 0;
   G.mods = []; G.toasts = []; G.ending = '';
+  tutorialIdx = tutorialSeen ? TUTORIAL.length : 0;
   perkCoffee = 12; perkRecovery = 35; perkSprint = 0; perkSqueak = 11; perkFull = FULL;
   perksTaken.length = 0;
   perkPicker?.remove(); perkPicker = null; perkPaused = false;
   closeWardrobe();
   strutting = false; strutT = 0; strutMirror = null; G.struts = 0;
   if (legend) { legend.obj.parent?.remove(legend.obj); legend = null; }
+  // reset staff: a chaser left mid-chase would insta-catch the respawned hero
+  for (const s of staff) {
+    const wp0 = s.wp[0];
+    s.x = wp0[0]; s.z = wp0[1]; s.state = 'patrol'; s.wpIdx = 0; s.t = 0;
+    s.obj.position.set(s.x, 0, s.z);
+  }
   for (const d of splashDrops) { d.m.parent?.remove(d.m); (d.m.material as THREE.Material).dispose(); }
   splashDrops.length = 0;
   player.x = -18; player.z = 12; vel.x = 0; vel.z = 0;
@@ -978,6 +1010,7 @@ function accident(caught = false): void {
   toast("...SPLASH. You heard that, didn't you?");
   SFX.splash(); SFX.plop();
   camShake = 0.14;
+  hitStop = 0.22; // juice: the world stutters on the splash
   spawnSplash(hero.position.x, hero.position.z);
   for (const s of staff) {
     if (s.floor !== G.floor) continue;
@@ -988,6 +1021,10 @@ function accident(caught = false): void {
 function endRun(ending: string): void {
   if (G.mode !== 'play') return;
   G.mode = 'end';
+  if (!tutorialSeen) {
+    tutorialSeen = true;
+    try { localStorage.setItem('pp_tutorial_done', '1'); } catch { /* private mode */ }
+  }
   G.ending = ending;
   SFX.humStop();
   const bonus = ending.startsWith('CLEAN') ? 50 : ending.startsWith('WET') ? 25 : ending.startsWith('CAUGHT') ? 15 : 10;
@@ -1098,6 +1135,7 @@ window.__cap = {
     wardrobeOpen,
     legendActive: !!legend,
     legendPos: legend ? { x: +legend.obj.position.x.toFixed(1), z: +legend.obj.position.z.toFixed(1) } : null,
+    tutorialSeen,
     inFreezer: isIce(player.x, player.z),
     slippery: isSlippery(player.x, player.z),
     staff: staff.filter((s) => s.floor === G.floor).map((s) => ({ s: s.state, d: +Math.hypot(hero.position.x - s.x, hero.position.z - s.z).toFixed(1) })),
@@ -1127,6 +1165,7 @@ window.__cap = {
     for (const s of staff) if (s.floor === 1) { s.x = 21.5; s.z = 16.5; s.state = 'patrol'; s.wpIdx = 0; s.obj.position.set(s.x, 0, s.z); }
   },
   legend: () => { if (!legend && G.floor === 1) spawnLegend(); },
+  tutorial: (seen: boolean) => { tutorialSeen = seen; try { localStorage.setItem('pp_tutorial_done', seen ? '1' : '0'); } catch { /* */ } },
 };
 window.__pp = window.__cap;
 
@@ -1181,8 +1220,10 @@ const STATE_COLORS = ['#57cc57', '#d9d94d', '#f29b26', '#e64433'];
 // ---------- main loop ----------
 let last = performance.now();
 function step(): void {
-  const dt = Math.min(0.05, (performance.now() - last) / 1000);
+  const dt0 = Math.min(0.05, (performance.now() - last) / 1000);
   last = performance.now();
+  const dt = hitStop > 0 ? dt0 * 0.12 : dt0;
+  if (hitStop > 0) hitStop -= dt0;
 
   if (G.mode === 'play' && !perkPaused && !wardrobeOpen) {
     G.runTime += dt;
@@ -1275,6 +1316,7 @@ function step(): void {
     for (const s of shoppers) shopperStep(s, dt);
     legendStep(dt);
     splashStep(dt);
+    tutorialStep(dt);
 
     // random mess
     eventTimer -= dt;
