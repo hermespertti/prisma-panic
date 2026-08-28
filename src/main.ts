@@ -80,6 +80,7 @@ const TUTORIAL: [number, string][] = [
   [36, 'Toilets are the only safe spot, and standing there is vulnerable. The STAFF toilet is legally risky.'],
   [50, 'Sprint hard through the EAST doorway to reach the parking deck. Your getaway car is there.'],
   [64, 'B = wardrobe. Hold E at a mirror = The Strut. And if you see a man standing very still... that\'s the legend.'],
+  [80, 'When staff spot you, your bladder joins the chase — being hunted fills you. Panic is a resource too.'],
 ];
 let tutorialIdx = 0, tutorialSeen = false;
 try { tutorialSeen = localStorage.getItem('pp_tutorial_done') === '1'; } catch { /* first visit */ }
@@ -1027,6 +1028,7 @@ function startRun(seed?: number): void {
   puddles.length = 0;
   spillZones[0].length = 0; spillZones[1].length = 0;
   flickerOn = false; flickerT = 0;
+  panicOn = false;
   eventTimer = 24 + Math.random() * 16;
   buildSeedLayout(G.seed);
   buildInteractables();
@@ -1157,6 +1159,7 @@ function isSlippery(x: number, z: number): boolean {
   return false;
 }
 let flickerT = 0, flickerOn = false;
+let panicOn = false;
 let eventTimer = 24 + Math.random() * 16;
 
 // ---------- debug hooks ----------
@@ -1186,6 +1189,7 @@ window.__cap = {
     heroJeansMats: heroJeansMats.length,
     inFreezer: isIce(player.x, player.z),
     slippery: isSlippery(player.x, player.z),
+    panic: panicOn,
     staff: staff.filter((s) => s.floor === G.floor).map((s) => ({ s: s.state, d: +Math.hypot(hero.position.x - s.x, hero.position.z - s.z).toFixed(1) })),
     toasts: [...G.toasts], ending: G.ending,
     summary: (document.querySelector('.summary') as HTMLElement)?.textContent || '',
@@ -1211,6 +1215,18 @@ window.__cap = {
   },
   staffAway: () => {
     for (const s of staff) if (s.floor === 1) { s.x = 21.5; s.z = 16.5; s.state = 'patrol'; s.wpIdx = 0; s.obj.position.set(s.x, 0, s.z); }
+  },
+  staffChase: () => {
+    for (const s of staff) if (s.floor === 1) {
+      s.x = player.x + 10; s.z = player.z;
+      s.state = 'chase'; s.t = 999; s.obj.position.set(s.x, 0, s.z);
+    }
+  },
+  staffPatrol: () => {
+    for (const s of staff) if (s.floor === 1) { s.state = 'patrol'; s.t = 0; s.wpIdx = 0; }
+  },
+  staffAlert: () => {
+    for (const s of staff) if (s.floor === 1) { s.state = 'alert'; s.t = 999; }
   },
   legend: () => { if (!legend && G.floor === 1) spawnLegend(); },
   tutorial: (seen: boolean) => { tutorialSeen = seen; try { localStorage.setItem('pp_tutorial_done', seen ? '1' : '0'); } catch { /* */ } },
@@ -1306,6 +1322,12 @@ function step(): void {
     const moving = mx !== 0 || mz !== 0;
     let sp = sprinting && moving ? SPRINT + perkSprint : SPEED;
     if (G.wet) sp *= 0.88;
+    // M6: sprinting bounces the bladder — speed is a cost on every axis
+    if (sprinting && moving) {
+      if (!G.mods.includes(0.8)) G.mods.push(0.8);
+    } else {
+      delMod(0.8);
+    }
     const onIce = isSlippery(player.x, player.z);
     if (moving) {
       const len = Math.hypot(mx, mz);
@@ -1391,6 +1413,29 @@ function step(): void {
     if (flickerOn) {
       flickerT -= dt;
       if (flickerT <= 0) { flickerOn = false; delMod(0.4); }
+    }
+
+    // M6: panic — being hunted fills the bladder (the GDD's "panic (being spotted)" pillar)
+    // alert +0.5, chase +1.3 — distinct from ice 1.6 / sprint 0.8 / flicker 0.4 / coffee 0.35
+    {
+      let alerting = false, chasing = false;
+      for (const s of staff) {
+        if (s.floor !== G.floor) continue;
+        if (s.state === 'chase') chasing = true;
+        else if (s.state === 'alert') alerting = true;
+      }
+      if (chasing) {
+        if (!G.mods.includes(1.3)) {
+          if (!panicOn) toast('Your bladder is officially joining the chase.');
+          G.mods.push(1.3); panicOn = true;
+        }
+        delMod(0.5);
+      } else if (alerting) {
+        if (!G.mods.includes(0.5)) G.mods.push(0.5);
+        delMod(1.3); panicOn = false;
+      } else {
+        delMod(1.3); delMod(0.5); panicOn = false;
+      }
     }
 
     // interact: E edge-trigger

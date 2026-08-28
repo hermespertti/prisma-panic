@@ -121,7 +121,7 @@ are the character.
 | 3 | Roguelike systems — procedural store assembly, random events, upgrades at restocks, risk/reward items, difficulty scaling, multiple endings, run summary | **DONE** (M3) |
 | 4 | Comedy & personality — NPC reactions (shoppers, coffee lady, manager), The Strut + mirrors, wardrobe with mechanical profiles, physical comedy (squeeze-hop, splash particles), environmental storytelling, rare absurd events (the Prisma incident re-enacts in stockroom) | **DONE** (M4) |
 | 5 | Polish — Blender hero model (cap/jeans/belt per reference), lighting pass, sound design pass, juice (screen shake, hit-stop on splash), run summary screen, tutorial moments | **DONE** (M5) |
-| 6 | Content — ??? | next |
+| 6 | **Pressure interlocks** — sprinting costs bladder (bouncy legs fill faster), panic fill when hunted (staff alert +0.5 / chase +1.3 tiers, the GDD's "panic (being spotted)" pillar), the loop closes: every escape tool is itself pressure | next |
 
 **Build order discipline:** fun mechanic > playable prototype > game feel > polish > content.
 A feature that doesn't make the bladder loop more interesting gets cut.
