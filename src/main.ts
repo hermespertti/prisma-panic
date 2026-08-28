@@ -131,6 +131,7 @@ let perkPaused = false;
 function showPerkPicker(): void {
   if (perkPicker) return;
   perkPaused = true;
+  document.exitPointerLock?.(); // free the cursor so the buttons are clickable
   const wrap = document.createElement('div');
   wrap.className = 'picker';
   const title = document.createElement('div');
@@ -874,6 +875,7 @@ function closeWardrobe(): void { if (wardrobeWrap) { wardrobeWrap.remove(); ward
 function showWardrobe(): void {
   if (wardrobeOpen) return;
   wardrobeOpen = true;
+  document.exitPointerLock?.(); // free the cursor — the wardrobe has buttons to click
   const wrap = document.createElement('div');
   wrap.className = 'picker';
   const title = document.createElement('div');
