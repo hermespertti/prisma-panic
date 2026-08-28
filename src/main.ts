@@ -339,7 +339,7 @@ function buildHall(seed: number): void {
   ceil.rotation.x = Math.PI / 2;
   ceil.position.y = 3.4;
   g.add(ceil);
-  const stripMat = new THREE.MeshStandardMaterial({ color: 0xf2f6ff, emissive: 0xdfeaff, emissiveIntensity: 1.7, roughness: 0.4 });
+  const stripMat = new THREE.MeshStandardMaterial({ color: 0xf2f6ff, emissive: 0xdfeaff, emissiveIntensity: 1.25, roughness: 0.4 });
   for (const sx of [-15, -5, 5, 15]) for (const sz of [-10, 0, 10]) {
     const s = new THREE.Mesh(new THREE.BoxGeometry(1, 0.06, 5), stripMat);
     s.position.set(sx, 3.26, sz);
@@ -707,7 +707,7 @@ function applyAtmos(floor: number): void {
     scene.background = new THREE.Color(0x0b0d12);
     (scene.fog as THREE.Fog).color.set(0x0b0d12);
     (scene.fog as THREE.Fog).near = 12; (scene.fog as THREE.Fog).far = 46;
-    hemi.intensity = 0.16; sun.intensity = 0.3;
+    hemi.intensity = 0.28; sun.intensity = 0.55;
     sun.color.set(0xbfd2ff);
     store1.visible = false; store2.visible = true;
   }
@@ -1256,7 +1256,7 @@ barFill.className = 'barfill';
 bar.appendChild(barFill);
 const stateLbl = el('lbl state', 'BLADDER: FRESH');
 const clockLbl = el('lbl clock', '');
-const quotaLbl = el('lbl', 'QUOTA 0/3');
+const quotaLbl = el('lbl quota', 'QUOTA 0/3');
 const floorLbl = el('lbl floor', 'FLOOR 1 — MARKET HALL');
 const hintLbl = el('lbl hint', '');
 const wetLbl = el('lbl wet', 'WET PANTS');
