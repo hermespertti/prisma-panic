@@ -4,6 +4,7 @@
 // staff patrols on BOTH floors, slippery ice / oil / random leaks.
 // Same seed = same store. Your getaway car waits on the deck.
 import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import * as SFX from './audio';
 
 // ---------- seeded rng (one seed per shift) ----------
@@ -577,6 +578,38 @@ for (const s of [-1, 1]) {
 hero.position.set(-18, 0, 12);
 scene.add(hero);
 
+// ---------- the real hero: low-poly model from Blender (hero.glb) ----------
+// the primitive rig above stays as the load-fallback; when the GLB lands we
+// swap it in and re-point legs/arms at the LegL/LegR/ArmL/ArmR rig nodes
+let heroModelLoaded = false;
+const heroJeansMats: THREE.MeshStandardMaterial[] = [];
+new GLTFLoader().load(
+  'hero.glb',
+  (gltf) => {
+    for (const c of [...hero.children]) {
+      hero.remove(c);
+      c.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) m.geometry?.dispose(); });
+    }
+    const model = gltf.scene;
+    model.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (m.isMesh) {
+        m.castShadow = true;
+        const mats = Array.isArray(m.material) ? m.material : [m.material];
+        for (const mm of mats) if (mm.name === 'M_Jeans' && (mm as THREE.MeshStandardMaterial).isMeshStandardMaterial && !heroJeansMats.includes(mm as THREE.MeshStandardMaterial)) heroJeansMats.push(mm as THREE.MeshStandardMaterial);
+      }
+    });
+    hero.add(model);
+    const L = model.getObjectByName('LegL'), R = model.getObjectByName('LegR');
+    const AL = model.getObjectByName('ArmL'), AR = model.getObjectByName('ArmR');
+    if (L && R) { legs.length = 0; legs.push(L, R); }
+    if (AL && AR) { arms.length = 0; arms.push(AL, AR); }
+    heroModelLoaded = true;
+  },
+  undefined,
+  (err) => console.warn('hero.glb failed to load — using the primitive hero', err),
+);
+
 // ---------- STAFF (both floors) ----------
 type Staff = {
   obj: THREE.Group; torch?: THREE.SpotLight; legs: THREE.Object3D[];
@@ -1147,6 +1180,8 @@ window.__cap = {
     legendActive: !!legend,
     legendPos: legend ? { x: +legend.obj.position.x.toFixed(1), z: +legend.obj.position.z.toFixed(1) } : null,
     tutorialSeen,
+    heroModelLoaded,
+    heroJeansMats: heroJeansMats.length,
     inFreezer: isIce(player.x, player.z),
     slippery: isSlippery(player.x, player.z),
     staff: staff.filter((s) => s.floor === G.floor).map((s) => ({ s: s.state, d: +Math.hypot(hero.position.x - s.x, hero.position.z - s.z).toFixed(1) })),
@@ -1177,6 +1212,11 @@ window.__cap = {
   },
   legend: () => { if (!legend && G.floor === 1) spawnLegend(); },
   tutorial: (seen: boolean) => { tutorialSeen = seen; try { localStorage.setItem('pp_tutorial_done', seen ? '1' : '0'); } catch { /* */ } },
+  jeansRGB: () => {
+    const m = heroJeansMats[0] ?? jeansMat;
+    const c = (m as THREE.MeshStandardMaterial).color;
+    return [Math.round(c.r * 255), Math.round(c.g * 255), Math.round(c.b * 255)];
+  },
 };
 window.__pp = window.__cap;
 
@@ -1432,6 +1472,7 @@ function step(): void {
     camera.fov += (fovT - camera.fov) * Math.min(1, 3 * dt);
     camera.updateProjectionMatrix();
     jeansMat.color.lerp(G.wet ? wetJeans : dryJeans, Math.min(1, 4 * dt));
+    for (const jm of heroJeansMats) jm.color.lerp(G.wet ? wetJeans : dryJeans, Math.min(1, 4 * dt));
   }
 
   // ---------- camera placement ----------
