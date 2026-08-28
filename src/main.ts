@@ -723,7 +723,7 @@ let clock = 240 + Math.random() * 120;
 const keys = new Set<string>();
 const SPEED = 4.6, SPRINT = 7.4;
 const seedQuads: { f: number; x: number; z: number }[] = [];
-const quadMeshes: { x: number; z: number; f: number; mesh: THREE.Mesh }[] = [];
+const quadMeshes: { x: number; z: number; f: number; mesh: THREE.Mesh; collected: boolean }[] = [];
 
 // ---------- atmosphere ----------
 function applyAtmos(floor: number): void {
@@ -983,7 +983,7 @@ function buildSeedLayout(seed: number): void {
     m.position.set(q.x, 0.55, q.z);
     m.castShadow = true;
     (q.f === 1 ? store1 : store2).add(m);
-    quadMeshes.push({ x: q.x, z: q.z, f: q.f, mesh: m });
+    quadMeshes.push({ x: q.x, z: q.z, f: q.f, mesh: m, collected: false });
   }
   // staff per seed: wipe old crew (meshes + torches) before spawning the new one
   while (staffScene.children.length > 0) staffScene.remove(staffScene.children[0]);
@@ -1261,7 +1261,7 @@ window.__cap = {
     camY: +camera.position.y.toFixed(2), camClear: !camRayClear(hero.position.x, hero.position.y + 1.5, hero.position.z, camera.position.x, camera.position.y, camera.position.z),
     quota: G.quota, closing: Math.max(0, Math.round(G.closing)),
     accidents: G.accidents, score: G.score, relieving,
-    floor: G.floor, seed: G.seed,
+    floor: G.floor, floors: G.floors.size, seed: G.seed,
     difficulty: shiftDifficulty(G.seed), shiftName: shiftName(G.seed),
     perkPickerOpen: perkPicker !== null,
     perks: [...perksTaken],
@@ -1311,7 +1311,7 @@ window.__cap = {
       s.state = 'chase'; s.t = 999; s.obj.position.set(s.x, 0, s.z);
     }
   },
-  staffPos: () => staff.filter((s) => s.floor === 1).map((s) => [ +s.x.toFixed(2), +s.z.toFixed(2) ]),
+  staffPos: () => staff.filter((s) => s.floor === G.floor).map((s) => [ +s.x.toFixed(2), +s.z.toFixed(2) ]),
   staffChaseAt: (pts: [number, number][]) => {
     const f1 = staff.filter((s) => s.floor === 1);
     f1.forEach((s, i) => {
@@ -1343,6 +1343,18 @@ window.__cap = {
   report: () => ({
     head: !!document.querySelector('.reporthead'),
     lines: Array.from(document.querySelectorAll('.reportline')).map((el) => el.textContent || ''),
+  }),
+  // M8: soak-test world map — where the bot has to actually go
+  nav: () => ({
+    car: { x: carPos.x, z: carPos.z },
+    toilets: { floor1: { x: -22, z: -14.5 }, deck: { x: -16.9, z: -13.2 } },
+    doors: { hall: { x: 23.2, z: 12.1 }, deck: { x: 21.2, z: -13.9 } },
+    quads: seedQuads.map((q) => ({ f: q.f, x: +q.x.toFixed(1), z: +q.z.toFixed(1) })),
+    picker: () => {
+      const b = document.querySelector('.picker .popt');
+      if (b) { (b as HTMLElement).click(); return (b as HTMLElement).textContent || ''; }
+      return null;
+    },
   }),
 };
 window.__pp = window.__cap;
@@ -1482,17 +1494,30 @@ function step(): void {
     if (G.floor === 2 && swapCd <= 0 && Math.hypot(player.x - DECK_DOOR.x, player.z - DECK_DOOR.z) < DECK_DOOR.r && Math.hypot(vel.x, vel.z) > 1.5) swapFloor(1);
 
     // quads (both floors, seeded spots)
-    for (const q of quadMeshes) {
-      if (q.f === G.floor && Math.hypot(q.x - player.x, q.z - player.z) < 1.1) {
-        q.mesh.visible = false;
-        G.quota++; G.score += 10;
-        if (G.quota === 1 || G.quota === 2) {
-          toast(`Quota item secured. (${G.quota}/3) The store manager is watching you now.`);
-          showPerkPicker();
-        } else {
-          toast(`Quota item secured. (${G.quota}/3) Trunk's open. Run.`);
+    // collected-flag: the pickup must fire ONCE per quad. Without it, a player
+    // standing on the spot (worst case: paused on it while the perk picker is
+    // open) re-triggers quota/score/thump every frame — the soak test found quota 474.
+    // The store seeds 4-5 items but the quota is 3 — clamp the counter at the
+    // total so the HUD never reads "QUOTA 4/3" (soak test, seed 1337).
+    if (!perkPaused) {
+      for (const q of quadMeshes) {
+        if (!q.collected && q.f === G.floor && Math.hypot(q.x - player.x, q.z - player.z) < 1.1) {
+          q.collected = true;
+          q.mesh.visible = false;
+          G.score += 10;
+          if (G.quota < G.quotaTotal) {
+            G.quota++;
+            if (G.quota === 1 || G.quota === 2) {
+              toast(`Quota item secured. (${G.quota}/3) The store manager is watching you now.`);
+              showPerkPicker();
+            } else {
+              toast(`Quota item secured. (${G.quota}/3) Trunk's open. Run.`);
+            }
+          } else {
+            toast('The cart is already full. The extra one goes in your jeans pocket. (+10)');
+          }
+          SFX.thump();
         }
-        SFX.thump();
       }
     }
 
