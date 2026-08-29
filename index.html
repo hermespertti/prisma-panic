@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%92%99%3C/text%3E%3C/svg%3E" />
 <title>PRISMA PANIC — the store closes when the pants decide</title>
 <meta property="og:title" content="PRISMA PANIC — the store closes when the pants decide"/>
@@ -74,6 +74,24 @@
     padding:11px 26px; border:1px solid #ffffff2e; border-radius:9px; background:#161a2488;
     animation:tpulse 1.6s ease-in-out infinite; }
   @keyframes tpulse { 0%,100% { opacity:1; box-shadow:0 0 0 #e67a1400; } 50% { opacity:.72; box-shadow:0 0 22px #e67a1455; } }
+  /* M11: touch controls — virtual stick (left), look zone (right field),
+     action buttons (top-right). All pointer-events:auto islands in the HUD. */
+  .tjoybase { position:absolute; left:26px; bottom:calc(26px + env(safe-area-inset-bottom));
+    width:124px; height:124px; border-radius:50%; pointer-events:auto;
+    background:#0e0f1466; border:2px solid #ffffff2e; touch-action:none; }
+  .tjoyknob { position:absolute; left:50%; top:50%; width:54px; height:54px; margin:-27px 0 0 -27px;
+    border-radius:50%; background:#e67a1499; border:2px solid #ff9c3daa;
+    transform:translate(var(--kx,0px), var(--ky,0px)); }
+  .tbtn { position:absolute; right:calc(18px + env(safe-area-inset-right)); pointer-events:auto;
+    min-width:64px; height:64px; padding:0 14px; border-radius:14px; touch-action:none;
+    display:flex; align-items:center; justify-content:center;
+    font:800 13px/1.2 "Segoe UI", system-ui, sans-serif; letter-spacing:1.5px;
+    color:#e8ecf2; background:#0e0f1499; border:2px solid #ffffff2e;
+    text-shadow:0 1px 3px #000; user-select:none; -webkit-user-select:none; }
+  .tbtn.active { background:#e67a14aa; border-color:#ff9c3d; }
+  .tbtnSprint { top:calc(14px + env(safe-area-inset-top)); }
+  .tbtnCrouch { top:88px; }
+  .tbtnUse { top:162px; }
 </style>
 </head>
 <body>

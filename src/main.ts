@@ -304,6 +304,7 @@ function dismissTitle(): void {
   if (!titleUp) return;
   titleUp = false;
   if (titleEl) titleEl.style.display = 'none';
+  if (isTouch) buildTouchUI(); // touch is reliable by first-tap time; desktop stays clean
   const p = renderer.domElement.requestPointerLock?.() as unknown as Promise<void> | undefined;
   p?.catch?.(() => { /* programmatic unlock (probes) — no gesture, no big deal */ });
   SFX.humStart();
@@ -883,6 +884,10 @@ let footstepCount = 0, staffStepCount = 0, nearMissCount = 0; // M8 feel: probe-
 const isCrouched = () => crouchScale < 0.85; // visually ducked (covers the lerp)
 let clock = 240 + Math.random() * 120;
 const keys = new Set<string>();
+// M11: touch input — analog stick vector, fed into the same movement math
+const touchStick = { active: false, x: 0, y: 0, id: -1 };
+let touchUI: HTMLElement | null = null;
+const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
 const SPEED = 4.6, SPRINT = 7.4;
 const seedQuads: { f: number; x: number; z: number }[] = [];
 const quadMeshes: { x: number; z: number; f: number; mesh: THREE.Mesh; collected: boolean }[] = [];
@@ -1549,6 +1554,10 @@ window.__cap = {
     summary: (document.querySelector('.summary') as HTMLElement)?.textContent || '',
   }),
   keys: (k: string, down: boolean) => { if (down) keys.add(k); else keys.delete(k); },
+  touchUI: () => !!document.querySelector('[data-pp="stick"]'),
+  touchBuild: () => { buildTouchUI(); return !!document.querySelector('[data-pp="stick"]'); },
+  stick: (x: number, y: number) => { touchStick.active = x !== 0 || y !== 0; touchStick.x = x; touchStick.y = y; },
+  stickState: () => ({ a: touchStick.active, x: +touchStick.x.toFixed(2), y: +touchStick.y.toFixed(2) }),
   walk: (down: boolean) => { if (down) keys.add('KeyW'); else keys.delete('KeyW'); },
   teleport: (x: number, z: number) => { player.x = x; player.z = z; vel.x = 0; vel.z = 0; },
   yaw: (y: number, p?: number) => { camYaw = y; if (p !== undefined) camRig.pitch = p; },
@@ -1665,6 +1674,105 @@ addEventListener('resize', () => {
   renderer.setSize(innerWidth, innerHeight);
 });
 
+// ---------- M11: touch controls ----------
+// Thumbstick (left) writes an analog vector into the same movement math;
+// look zone (right half of the screen) drags camYaw/pitch like the mouse;
+// SPRINT/CROUCH/USE/BAG buttons push and delete the SAME e.code strings
+// the keyboard uses — so every existing mod/edge-trigger just works.
+const STICK_R = 46;
+function buildTouchUI(): void {
+  if (touchUI) return;
+
+  // look zone FIRST (bottom of the stack) — buttons append after so they sit on top
+  const look = document.createElement('div');
+  look.style.cssText = 'position:absolute;right:0;top:0;width:55%;height:60%;pointer-events:auto;touch-action:none;';
+  look.dataset.pp = 'look';
+  let lx = 0, ly = 0, lid = -1;
+  look.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); lid = e.pointerId; lx = e.clientX; ly = e.clientY;
+    try { look.setPointerCapture(e.pointerId); } catch { /* see stick note */ }
+  });
+  look.addEventListener('pointermove', (e) => {
+    if (e.pointerId !== lid) return;
+    e.preventDefault();
+    camYaw -= (e.clientX - lx) * 0.006;
+    camRig.pitch = THREE.MathUtils.clamp(camRig.pitch + (e.clientY - ly) * 0.005, -0.26, 1.4);
+    lx = e.clientX; ly = e.clientY;
+  });
+  const lookEnd = (e: PointerEvent) => { if (e.pointerId === lid) lid = -1; };
+  look.addEventListener('pointerup', lookEnd);
+  look.addEventListener('pointercancel', lookEnd);
+  hud.appendChild(look);
+
+  const base = document.createElement('div');
+  base.className = 'tjoybase';
+  base.dataset.pp = 'stick';
+  const knob = document.createElement('div');
+  knob.className = 'tjoyknob';
+  base.appendChild(knob);
+  let sx = 0, sy = 0, sid = -1;
+  const stickMove = (e: PointerEvent) => {
+    let dx = e.clientX - sx, dy = e.clientY - sy;
+    const len = Math.hypot(dx, dy);
+    if (len > STICK_R) { dx = dx * STICK_R / len; dy = dy * STICK_R / len; }
+    knob.style.setProperty('--kx', dx.toFixed(1) + 'px');
+    knob.style.setProperty('--ky', dy.toFixed(1) + 'px');
+    touchStick.x = dx / STICK_R;
+    touchStick.y = dy / STICK_R; // screen-down == KeyS == +z. matches keyboard axes exactly.
+  };
+  base.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    sid = e.pointerId;
+    const r = base.getBoundingClientRect();
+    sx = r.left + r.width / 2; sy = r.top + r.height / 2;
+    try { base.setPointerCapture(e.pointerId); } catch { /* headless/CDP pointers may reject capture — movement still routes while the finger stays inside */ }
+    touchStick.active = true; touchStick.id = e.pointerId;
+    stickMove(e);
+  });
+  base.addEventListener('pointermove', (e) => { if (e.pointerId === sid) { e.preventDefault(); stickMove(e); } });
+  const stickEnd = (e: PointerEvent) => {
+    if (e.pointerId !== sid) return;
+    sid = -1;
+    touchStick.active = false; touchStick.x = 0; touchStick.y = 0;
+    knob.style.setProperty('--kx', '0px'); knob.style.setProperty('--ky', '0px');
+  };
+  base.addEventListener('pointerup', stickEnd);
+  base.addEventListener('pointercancel', stickEnd);
+  hud.appendChild(base);
+
+  const hold = (cls: string, code: string, label: string): HTMLElement => {
+    const b = document.createElement('div');
+    b.className = 'tbtn ' + cls;
+    b.dataset.pp = cls;
+    b.textContent = label;
+    const dn = (e: PointerEvent) => { e.preventDefault(); keys.add(code); b.classList.add('active'); };
+    const up = (e: PointerEvent) => { e.preventDefault(); keys.delete(code); b.classList.remove('active'); };
+    b.addEventListener('pointerdown', dn);
+    b.addEventListener('pointerup', up);
+    b.addEventListener('pointercancel', up);
+    hud.appendChild(b);
+    return b;
+  };
+  hold('tbtnSprint', 'ShiftLeft', 'SPRINT');
+  hold('tbtnCrouch', 'KeyC', 'CROUCH');
+  const use = hold('tbtnUse', 'KeyE', 'USE');
+  const bag = document.createElement('div');
+  bag.className = 'tbtn tbtnUse';
+  bag.style.top = '236px';
+  bag.dataset.pp = 'tbtnBag';
+  bag.textContent = 'BAG';
+  bag.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); bag.classList.add('active');
+    if (wardrobeOpen) closeWardrobe(); else if (G.mode === 'play') showWardrobe();
+  });
+  bag.addEventListener('pointerup', () => bag.classList.remove('active'));
+  hud.appendChild(bag);
+  void use;
+
+  touchUI = base;
+}
+if (isTouch) buildTouchUI();
+
 // ---------- HUD ----------
 function el(cls: string, text: string): HTMLElement {
   const d = document.createElement('div');
@@ -1717,12 +1825,16 @@ function step(): void {
 
     // movement
     const sprinting = keys.has('ShiftLeft') || keys.has('ShiftRight');
-    let mx = 0, mz = 0;
+    let mx = 0, mz = 0, stickMag = 1;
     if (!relieving) {
       if (keys.has('KeyW') || keys.has('ArrowUp')) mz -= 1;
       if (keys.has('KeyS') || keys.has('ArrowDown')) mz += 1;
       if (keys.has('KeyA') || keys.has('ArrowLeft')) mx -= 1;
       if (keys.has('KeyD') || keys.has('ArrowRight')) mx += 1;
+      // M11: analog thumbstick — continuous vector, same camera-relative math.
+      // stickMag preserves the push distance the keyboard normalization would eat:
+      // half tilt = half walk speed, full tilt = full. The real analog promise.
+      if (touchStick.active) { mx = touchStick.x; mz = touchStick.y; stickMag = Math.min(1, Math.hypot(mx, mz)); }
     }
     const moving = mx !== 0 || mz !== 0;
     // M6: fake-shopping — hold C to crouch. slower, no sprint, but staff lose you
@@ -1752,8 +1864,8 @@ function step(): void {
       const wx = (fx * -mz + rx * mx) / len;
       const wz = (fz * -mz + rz * mx) / len;
       const accel = onIce ? 3.2 : 12;
-      vel.x += (wx * sp - vel.x) * Math.min(1, accel * dt);
-      vel.z += (wz * sp - vel.z) * Math.min(1, accel * dt);
+      vel.x += (wx * sp * stickMag - vel.x) * Math.min(1, accel * dt);
+      vel.z += (wz * sp * stickMag - vel.z) * Math.min(1, accel * dt);
       walkPhase += dt * (sprinting ? 11 : 8.5);
       // M8 feel: your own sneakers — distance-based strikes. Stride length per gait:
       // sprint 1.15u (loud+snappy), walk 0.95u, crouch 0.72u (soft+slow). The rate
