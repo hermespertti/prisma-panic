@@ -95,12 +95,16 @@ await sleep(600);
 s = await st();
 const sawIt = s.toasts.some((t) => /witness the incident|legend is real/.test(t));
 ok(sawIt || s.score > legendBefore, `witnessing the legend pays (toasts: ${JSON.stringify(s.toasts.slice(-2))})`);
-// poll for departure (dt-cap means game-time runs slower than wall-time under load)
+// poll for departure (dt-cap means game-time runs slower than wall-time under load).
+// Self-healing: a quad auto-collect (the teleport lands on a seeded quad) can open a
+// SECOND "quota secured" perk picker mid-poll — the picker pauses the game clock, the
+// legend freezes mid-blink, and the run looks hung. Take every offer that appears.
 let departed = false;
 const traj = [];
 for (let i = 0; i < 75; i++) {
   await sleep(400);
   const q = await st();
+  if (q.perkPickerOpen) await page.evaluate(() => { window.__cap.perkPicker(); });
   if (i % 6 === 0) traj.push(`t+${((i + 1) * 0.4).toFixed(1)}s mode=${q.mode} rt=${(q.runTime || 0).toFixed(1)} close=${q.closing} wet=${q.wet} legend=${q.legendActive}`);
   if (!q.legendActive) { departed = true; break; }
 }

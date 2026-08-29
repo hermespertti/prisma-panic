@@ -7,12 +7,33 @@ let humGain: GainNode | null = null;
 let humOsc: OscillatorNode | null = null;
 let humOsc2: OscillatorNode | null = null;
 
+// ---------- M12: mute — players on a phone need the volume off in public ----------
+// Persisted to localStorage so a mute choice survives reloads. Read before the
+// graph is ever built, so a muted player never hears the first hum.
+let muted = false;
+try { muted = localStorage.getItem('pp_muted') === '1'; } catch { /* private mode */ }
+
+function applyGain(): void {
+  if (master && ctx) master.gain.setTargetAtTime(muted ? 0 : 0.85, ctx.currentTime, 0.02);
+}
+
+export function setMuted(m: boolean): boolean {
+  muted = m;
+  try { localStorage.setItem('pp_muted', m ? '1' : '0'); } catch { /* private mode */ }
+  applyGain();
+  return muted;
+}
+
+export function toggleMuted(): boolean { return setMuted(!muted); }
+
+export function isMuted(): boolean { return muted; }
+
 function ensure(): AudioContext | null {
   try {
     if (!ctx) {
       ctx = new AudioContext();
       master = ctx.createGain();
-      master!.gain.value = 0.85;
+      master!.gain.value = muted ? 0 : 0.85; // M12: persisted mute respected at graph build
       master!.connect(ctx.destination);
     }
     if (ctx.state === 'suspended') void ctx.resume();

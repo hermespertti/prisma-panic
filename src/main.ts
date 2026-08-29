@@ -133,16 +133,29 @@ function toast(msg: string): void {
 }
 
 // ---------- first-run tutorial (once, per browser) ----------
-const TUTORIAL: [number, string][] = [
-  [1, 'WASD to move, mouse to look, Shift to sprint. Sprinting fills your bladder faster — that\'s the deal.'],
-  [10, 'The yellow bar is your bladder. It fills all the time. Full bar = ...an event.'],
-  [22, 'Orange cubes are quota items. Grab all 3 — the store will offer you "benefits" along the way.'],
-  [36, 'Toilets are the only safe spot, and standing there is vulnerable. The STAFF toilet is legally risky.'],
-  [50, 'Sprint hard through the EAST doorway to reach the parking deck. Your getaway car is there.'],
-  [64, 'B = wardrobe. Hold E at a mirror = The Strut. And if you see a man standing very still... that\'s the legend.'],
-  [80, 'When staff spot you, your bladder joins the chase — being hunted fills you. Panic is a resource too.'],
-  [96, 'Hold C to crouch. You get slow, your bladder buys seconds, and behind a shelf you are nobody. Fake-shop with me.'],
-];
+// M12: two scripts — a phone never reads "WASD to move" and believes it.
+const touchFirst = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+const TUTORIAL: [number, string][] = touchFirst
+  ? [
+      [1, 'Left thumb on the stick to walk, right side of the screen to look. SPRINT fills your bladder faster — that\'s the deal.'],
+      [10, 'The yellow bar is your bladder. It fills all the time. Full bar = ...an event.'],
+      [22, 'Orange cubes are quota items. Walk over all 3 — the store will offer you "benefits" along the way.'],
+      [36, 'Toilets are the only safe spot, and standing there is vulnerable. The STAFF toilet is legally risky.'],
+      [50, 'Sprint hard through the EAST doorway to reach the parking deck. Your getaway car is there.'],
+      [64, 'BAG = wardrobe. Hold USE at a mirror = The Strut. And if you see a man standing very still... that\'s the legend.'],
+      [80, 'When staff spot you, your bladder joins the chase — being hunted fills you. Panic is a resource too.'],
+      [96, 'CROUCH button. You get slow, your bladder buys seconds, and behind a shelf you are nobody. Fake-shop with me.'],
+    ]
+  : [
+      [1, 'WASD to move, mouse to look, Shift to sprint. Sprinting fills your bladder faster — that\'s the deal.'],
+      [10, 'The yellow bar is your bladder. It fills all the time. Full bar = ...an event.'],
+      [22, 'Orange cubes are quota items. Grab all 3 — the store will offer you "benefits" along the way.'],
+      [36, 'Toilets are the only safe spot, and standing there is vulnerable. The STAFF toilet is legally risky.'],
+      [50, 'Sprint hard through the EAST doorway to reach the parking deck. Your getaway car is there.'],
+      [64, 'B = wardrobe. Hold E at a mirror = The Strut. And if you see a man standing very still... that\'s the legend.'],
+      [80, 'When staff spot you, your bladder joins the chase — being hunted fills you. Panic is a resource too.'],
+      [96, 'Hold C to crouch. You get slow, your bladder buys seconds, and behind a shelf you are nobody. Fake-shop with me.'],
+    ];
 let tutorialIdx = 0, tutorialSeen = false;
 try { tutorialSeen = localStorage.getItem('pp_tutorial_done') === '1'; } catch { /* first visit */ }
 function tutorialStep(dt: number): void {
@@ -308,6 +321,41 @@ function dismissTitle(): void {
   const p = renderer.domElement.requestPointerLock?.() as unknown as Promise<void> | undefined;
   p?.catch?.(() => { /* programmatic unlock (probes) — no gesture, no big deal */ });
   SFX.humStart();
+}
+
+// ---------- M12: mute button + PWA registration ----------
+// A permanent 🎚 in the corner. Persists via audio.ts localStorage. Works before
+// the clock-in tap (it just flips the flag the graph will respect when built).
+let muteBtn: HTMLElement | null = null;
+function paintMute(): void {
+  if (!muteBtn) return;
+  const m = SFX.isMuted();
+  muteBtn.textContent = m ? '🔇' : '🔊';
+  muteBtn.classList.toggle('muted', m);
+}
+function buildMuteBtn(): void {
+  const b = document.createElement('div');
+  b.className = 'mutebtn';
+  b.dataset.pp = 'mute';
+  b.setAttribute('role', 'button');
+  b.setAttribute('aria-label', 'toggle sound');
+  b.style.pointerEvents = 'auto';
+  b.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); e.stopPropagation();
+    SFX.toggleMuted();
+    paintMute();
+  });
+  document.body.appendChild(b);
+  muteBtn = b;
+  paintMute();
+}
+buildMuteBtn();
+
+// PWA: register the offline shell (skipped in headless probes so they stay hermetic)
+if (!navigator.userAgent.includes('HeadlessChrome') && 'serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js').catch(() => { /* offline is a bonus, not a dependency */ });
+  });
 }
 
 // ---------- lights (store lights live INSIDE the floor groups so swapping
@@ -1556,6 +1604,9 @@ window.__cap = {
   keys: (k: string, down: boolean) => { if (down) keys.add(k); else keys.delete(k); },
   touchUI: () => !!document.querySelector('[data-pp="stick"]'),
   touchBuild: () => { buildTouchUI(); return !!document.querySelector('[data-pp="stick"]'); },
+  mute: (m?: boolean) => (m === undefined ? SFX.toggleMuted() : SFX.setMuted(m)),
+  muted: () => SFX.isMuted(),
+  manifest: () => (document.querySelector('link[rel="manifest"]') as HTMLLinkElement | null)?.href || null,
   stick: (x: number, y: number) => { touchStick.active = x !== 0 || y !== 0; touchStick.x = x; touchStick.y = y; },
   stickState: () => ({ a: touchStick.active, x: +touchStick.x.toFixed(2), y: +touchStick.y.toFixed(2) }),
   walk: (down: boolean) => { if (down) keys.add('KeyW'); else keys.delete('KeyW'); },
