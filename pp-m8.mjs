@@ -209,8 +209,10 @@ for (const seed of SEEDS) {
   ok(r.quota <= 3, `s${seed}: quota clamped at 3 (got ${r.quota})`); // the M8 bug: was 474
   ok(r.quota >= 3 || isCaught || isClosed, `s${seed}: quota filled or valid failure ending (quota ${r.quota})`);
   // bladder invariant: pressure that got near-critical must have resolved —
-  // relieved at a toilet, or turned into a wet-pants accident (not a silent leak)
-  if (r.maxPressure >= 80) ok(r.reliefTicks > 0 || r.wet, `s${seed}: near-critical pressure resolved (relief ${r.reliefTicks}, wet ${r.wet}, maxP ${r.maxPressure})`);
+  // relieved at a toilet, or turned into a wet-pants accident (not a silent leak).
+  // CAUGHT is its own resolution: the game deliberately skips the splash on a
+  // catch (accident(caught) early-returns), so a 35s catch at 84% is clean.
+  if (r.maxPressure >= 80 && !isCaught) ok(r.reliefTicks > 0 || r.wet, `s${seed}: near-critical pressure resolved (relief ${r.reliefTicks}, wet ${r.wet}, maxP ${r.maxPressure})`);
   if (r.quota >= 2) ok(r.picked.length >= 2, `s${seed}: bot picked perks at quota 1 and 2 (${r.picked.length} picks)`);
   if (r.legendDone) ok(r.report.lines.some((l) => l.includes('2020 incident')), `s${seed}: legend sighting made it into the report`);
 }
