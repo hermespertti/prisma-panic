@@ -195,6 +195,37 @@ document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === renderer.domElement;
 });
 
+// ---------- M8 feel: clock-in title — the first click is the audio-unlock gesture ----------
+// Non-blocking overlay: the run is LIVE behind the card (exactly as before, so
+// probes and humans see the same boot) but the AudioContext is still suspended
+// until a real user gesture. Clicking CLOCK IN is that gesture — it hides the
+// card, grabs pointer lock, and resumes the audio graph (hum + all SFX).
+let titleUp = false;
+let titleEl: HTMLElement | null = null;
+function buildTitle(): void {
+  let pb = 0; try { pb = parseInt(localStorage.getItem('pp_best') || '0') || 0; } catch { /* private mode */ }
+  const t = document.createElement('div');
+  t.className = 'title';
+  t.innerHTML =
+    `<div class="tlogo">PRISMA PANIC</div>` +
+    `<div class="ttag">the store closes when the pants decide</div>` +
+    `<div class="tbest">${pb > 0 ? 'personal best ' + pb : 'first shift on the clock'}</div>` +
+    `<div class="tctrl">WASD move · mouse look · SHIFT sprint · C fake-shop crouch · E use · B wardrobe<br>grab the 3 quota items, find a toilet, and get out to the car before the lights die</div>` +
+    `<div class="tgo">CLICK TO CLOCK IN</div>`;
+  t.addEventListener('click', dismissTitle);
+  document.body.appendChild(t);
+  titleEl = t;
+  titleUp = true;
+}
+function dismissTitle(): void {
+  if (!titleUp) return;
+  titleUp = false;
+  if (titleEl) titleEl.style.display = 'none';
+  const p = renderer.domElement.requestPointerLock?.() as unknown as Promise<void> | undefined;
+  p?.catch?.(() => { /* programmatic unlock (probes) — no gesture, no big deal */ });
+  SFX.humStart();
+}
+
 // ---------- lights (store lights live INSIDE the floor groups so swapping
 // floors swaps the whole mood: bright hall vs floodlit deck) ----------
 scene.add(new THREE.AmbientLight(0xe6ebf2, 0.55));
@@ -625,6 +656,7 @@ type Staff = {
   state: 'patrol' | 'alert' | 'chase' | 'return';
   wp: [number, number][]; wpIdx: number;
   speed: number; t: number; phase: number; lastSqueak: number; lostT: number; lostClear: number;
+  stepAccum: number; nearMissAt: number; // M8 feel: guard footstep cadence + near-miss cooldown
 };
 const staffMat = new THREE.MeshStandardMaterial({ color: 0xf4f1e6, roughness: 0.85 });
 const visorMat = new THREE.MeshStandardMaterial({ color: 0xf2c40e, roughness: 0.6 });
@@ -636,6 +668,7 @@ function makeStaff(floor: number, x: number, z: number, wp: [number, number][], 
   const st: Staff = {
     obj: g, legs: [], x, z, yaw: 0, floor,
     state: 'patrol', wp, wpIdx: 0, speed: 2.6, t: 0, phase: Math.random() * 6, lastSqueak: 0, lostT: 0, lostClear: 0,
+    stepAccum: 0, nearMissAt: 0,
   };
   for (const s of [-1, 1]) {
     const leg = new THREE.Group(); leg.position.set(s * 0.14, 0.7, 0); g.add(leg);
@@ -716,8 +749,10 @@ const player = { x: -18, z: 12, r: 0.36 };
 const vel = { x: 0, z: 0 };
 let camYaw = -Math.PI / 2, camShake = 0, hitStop = 0;
 let walkPhase = 0, relieving = false, heartbeatT = 0, dripT = 0, squeakT = 0, eHeld = false;
+let stepAccum = 0; // M8 feel: footstep cadence — distance-based strikes (stride length per gait)
 let crouching = false, crouchScale = 1; // M6: fake-shopping — crouch to duck behind shelves
 let crouchToasted = false;
+let footstepCount = 0, staffStepCount = 0, nearMissCount = 0; // M8 feel: probe-visible cadence counters
 const isCrouched = () => crouchScale < 0.85; // visually ducked (covers the lerp)
 let clock = 240 + Math.random() * 120;
 const keys = new Set<string>();
@@ -1214,6 +1249,7 @@ function staffStep(s: Staff, dt: number): void {
   const d = Math.hypot(dx, dz);
   const spd = s.state === 'chase' ? 5.2 : s.state === 'alert' ? 3.6 : 2.6;
   if (d > 0.15) {
+    const prevPhase = s.phase;
     const nx = s.x + (dx / d) * spd * dt, nz = s.z + (dz / d) * spd * dt;
     s.x = nx; s.z = nz;
     s.yaw = THREE.MathUtils.lerp(s.yaw, Math.atan2(dx, dz), Math.min(1, 10 * dt));
@@ -1222,6 +1258,23 @@ function staffStep(s: Staff, dt: number): void {
     s.obj.rotation.y = s.yaw;
     const swing = Math.min(1.2, spd / 4.6);
     for (let i = 0; i < 2; i++) s.legs[i].rotation.x = Math.sin(s.phase + i * Math.PI) * 0.5 * swing;
+    // M8 feel: the guard has HEELS. Each footfall (half phase cycle) is audible with
+    // distance falloff — a chaser is a different sound than a patrol.
+    if (G.mode === 'play' && Math.floor(s.phase / Math.PI) > Math.floor(prevPhase / Math.PI)) {
+      const hd = Math.hypot(player.x - s.x, player.z - s.z);
+      if (hd < 16) {
+        const base = s.state === 'chase' ? 0.26 : s.state === 'alert' ? 0.16 : 0.1;
+        SFX.staffStepSfx(base * (1 - hd / 16));
+        staffStepCount++;
+      }
+    }
+  }
+  // M8 feel: near-miss — a chaser closes to a hair's width without landing. Whoop + flinch.
+  if (s.state === 'chase' && G.mode === 'play' && heroD > 1.15 && heroD < 1.9 && performance.now() - s.nearMissAt > 2600) {
+    s.nearMissAt = performance.now();
+    SFX.nearMiss();
+    nearMissCount++;
+    camShake = Math.max(camShake, 0.09);
   }
 }
 
@@ -1273,6 +1326,8 @@ window.__cap = {
     legendActive: !!legend,
     legendPos: legend ? { x: +legend.obj.position.x.toFixed(1), z: +legend.obj.position.z.toFixed(1) } : null,
     tutorialSeen,
+    titleUp,
+    footstepCount, staffStepCount, nearMissCount, // M8 feel: probe-visible cadence counters
     heroModelLoaded,
     heroJeansMats: heroJeansMats.length,
     inFreezer: isIce(player.x, player.z),
@@ -1332,6 +1387,8 @@ window.__cap = {
   },
   legend: () => { if (!legend && G.floor === 1) spawnLegend(); },
   tutorial: (seen: boolean) => { tutorialSeen = seen; try { localStorage.setItem('pp_tutorial_done', seen ? '1' : '0'); } catch { /* */ } },
+  clockIn: () => { dismissTitle(); },
+  audioState: () => SFX.audioState(),
   jeansRGB: () => {
     const m = heroJeansMats[0] ?? jeansMat;
     const c = (m as THREE.MeshStandardMaterial).color;
@@ -1469,6 +1526,23 @@ function step(): void {
       vel.x += (wx * sp - vel.x) * Math.min(1, accel * dt);
       vel.z += (wz * sp - vel.z) * Math.min(1, accel * dt);
       walkPhase += dt * (sprinting ? 11 : 8.5);
+      // M8 feel: your own sneakers — distance-based strikes. Stride length per gait:
+      // sprint 1.15u (loud+snappy), walk 0.95u, crouch 0.72u (soft+slow). The rate
+      // falls out of actual ground speed, so a crouch-walk is audibly slower, not just quieter.
+      {
+        const spNow = Math.hypot(vel.x, vel.z);
+        if (spNow > 0.6) {
+          stepAccum += spNow * dt;
+          const stride = sprinting && moving ? 1.15 : isCrouched() ? 0.72 : 0.95;
+          while (stepAccum >= stride) {
+            stepAccum -= stride;
+            SFX.stepSfx(sprinting && moving, isCrouched());
+            footstepCount++;
+          }
+        } else {
+          stepAccum = 0;
+        }
+      }
       if (onIce) {
         squeakT -= dt;
         if (squeakT <= 0) { SFX.squeak(); squeakT = 0.34; }
@@ -1477,6 +1551,7 @@ function step(): void {
       const grip = onIce ? 1.6 : 14;
       vel.x *= Math.max(0, 1 - grip * dt);
       vel.z *= Math.max(0, 1 - grip * dt);
+      stepAccum = 0;
     }
     let nx = player.x + vel.x * dt, nz = player.z + vel.z * dt;
     [nx, nz] = collide(nx, nz, player.r);
@@ -1699,4 +1774,5 @@ function step(): void {
 }
 
 startRun(4271);
+buildTitle();
 requestAnimationFrame(step);

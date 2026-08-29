@@ -34,6 +34,13 @@ function noiseBuffer(c: AudioContext, seconds: number): AudioBuffer {
   }
   return buf;
 }
+// cached step-size + long noise — a footstep fires ~4-8x/second; don't synthesize a
+// 3840-sample buffer per strike (M8 feel pass)
+let stepNoise: AudioBuffer | null = null;
+function stepNoiseBuf(c: AudioContext): AudioBuffer {
+  if (!stepNoise) stepNoise = noiseBuffer(c, 0.07);
+  return stepNoise;
+}
 
 /** Descending/ascending sine blip (drips, plops). */
 export function tone(freq: number, dur: number, vol: number, type: OscillatorType = 'sine'): void {
@@ -127,7 +134,70 @@ export function squeak(): void {
   tone(2350, 0.1, 0.03, 'sine');
 }
 
+/** Context state for probes — 'running' only after a real user gesture (or resume). */
+export function audioState(): string {
+  return ctx ? ctx.state : 'none';
+}
+
 /** Caught by staff: the alarm that ends your shift. */
 export function alarm(): void {
   tone(720, 0.5, 0.3, 'square');
+}
+
+// ---------- M8 feel pass: footsteps, staff footsteps, near-miss tension ----------
+
+/** Sneaker tap. Sprint = snappier + higher, crouch = softer + lower (rubber sole). */
+export function stepSfx(sprinting: boolean, crouched: boolean): void {
+  const c = ensure();
+  if (!c || !master) return;
+  const f = c.createBufferSource();
+  f.buffer = stepNoiseBuf(c);
+  const bp = c.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = crouched ? 220 : sprinting ? 520 : 380;
+  bp.Q.value = 1.2;
+  const g = c.createGain();
+  const v = crouched ? 0.05 : sprinting ? 0.16 : 0.09;
+  g.gain.setValueAtTime(v, c.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + 0.07);
+  f.connect(bp).connect(g).connect(master);
+  f.start();
+}
+
+/** Guard footstep: one octave down + lowpass, so a guard is heard as a HEEL, not a sneaker. */
+export function staffStepSfx(vol: number): void {
+  const c = ensure();
+  if (!c || !master) return;
+  if (vol < 0.01) return;
+  const f = c.createBufferSource();
+  f.buffer = stepNoiseBuf(c);
+  const bp = c.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.frequency.value = 150;
+  bp.Q.value = 1.0;
+  const g = c.createGain();
+  g.gain.setValueAtTime(vol, c.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + 0.08);
+  f.connect(bp).connect(g).connect(master);
+  f.start();
+  tone(64, 0.06, vol * 0.7, 'sine'); // heel weight under the scuff
+}
+
+/** Near-miss whoop: a rising air-rush as the guard closes to within a step. */
+export function nearMiss(): void {
+  const c = ensure();
+  if (!c || !master) return;
+  const f = c.createBufferSource();
+  f.buffer = noiseBuffer(c, 0.3);
+  const bp = c.createBiquadFilter();
+  bp.type = 'bandpass';
+  bp.Q.value = 1.6;
+  bp.frequency.setValueAtTime(320, c.currentTime);
+  bp.frequency.exponentialRampToValueAtTime(1400, c.currentTime + 0.28);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, c.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.34, c.currentTime + 0.08);
+  g.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + 0.3);
+  f.connect(bp).connect(g).connect(master);
+  f.start();
 }

@@ -193,9 +193,11 @@ for (const seed of SEEDS) {
   ok(r.minClosing >= 0, `s${seed}: closing clock never negative`);
   ok(r.camClearRatio >= 0.8, `s${seed}: camera clear most of the time (${r.camClearRatio})`);
   ok(r.score > 0, `s${seed}: score accumulated (${r.score})`);
-  // duration must match the ending's character
+  // duration must match the ending's character. CAUGHT can land any time while the
+  // store is open — a bot caught at 239s on a 240s closing shift is a real ending,
+  // so the bound is the closing window, not an arbitrary 200.
   const isCaught = r.ending.startsWith('CAUGHT'), isClosed = r.ending.startsWith('STORE CLOSED'), isExit = r.ending.startsWith('CLEAN') || r.ending.startsWith('WET');
-  const durOk = isCaught ? r.runTime > 3 && r.runTime < 200 : isClosed ? r.runTime > CLOSING - 15 : r.runTime > 25 && r.runTime < 300;
+  const durOk = isCaught ? r.runTime > 3 && r.runTime < CLOSING + 5 : isClosed ? r.runTime > CLOSING - 15 : r.runTime > 25 && r.runTime < 300;
   ok(durOk, `s${seed}: run duration matches ending (${r.ending.slice(0, 12)}... lasted ${r.runTime}s)`);
   ok(r.report.head, `s${seed}: shift report rendered`);
   ok(r.report.lines.length >= 3, `s${seed}: report has >=3 lines (got ${r.report.lines.length})`);
