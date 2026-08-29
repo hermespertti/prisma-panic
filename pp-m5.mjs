@@ -87,6 +87,10 @@ ok(s.legendActive === true && s.legendPos, `the legend appears (at ${JSON.string
 await page.evaluate(() => { window.__cap.staffAway(); });
 await sleep(200);
 await page.evaluate((p) => window.__cap.teleport(p.x, p.z), (await st()).legendPos);
+// the legend can spawn on a seeded quad (spot pool overlaps the quad pool) —
+// teleporting there auto-collects it and opens the perk picker, which pauses
+// the clock. Take the first offer so legendStep keeps running.
+await page.evaluate(() => { window.__cap.perkPicker(); });
 await sleep(600);
 s = await st();
 const sawIt = s.toasts.some((t) => /witness the incident|legend is real/.test(t));

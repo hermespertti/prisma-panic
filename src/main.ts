@@ -59,10 +59,65 @@ function stateName(): string { return STATE_NAMES[stateIdx()]; }
 function pressureRate(): number {
   let r = BASE_FILL * (1 + 0.09 * (shiftDifficulty(G.seed) - 1) + pantsNow().fill) + G.mods.reduce((a, b) => a + b, 0);
   if (G.wet) r *= 1.15;
-  return r;
+  // M10: the longer you've been a mess, the faster the store's judgment fills you.
+  // +0.15 / +0.30 / +0.60 for tiers 1/2/3 — tension, not a cliff. Tiers run 0-3,
+  // so the table must have exactly 4 entries (a 5th is silently dead).
+  r *= 1 + [0, 0.15, 0.3, 0.6][wetTier()];
+  return r * perkFillMul; // M10: ICE WATER perk scales the whole fill curve
 }
 function addMod(v: number): void { if (!G.mods.includes(v)) G.mods.push(v); }
 function delMod(v: number): void { const i = G.mods.indexOf(v); if (i >= 0) G.mods.splice(i, 1); }
+
+// ---------- M10: wet-state escalation — embarrassment is a STATE, not a badge ----------
+// Once you've leaked, the store finds out, and over ~90s the consequences stack:
+// tier 0 (0-30s)  the smell is local; shoppers within a radius get pointed
+// tier 1 (30-60s) the smell drifts — the radius grows, shoppers react faster
+// tier 2 (60-90s) the aisle KNOWS — staff can smell you from the break room and
+//                 go on alert without ever getting a clean look at you
+// tier 3 (90s+)   a manager makes the CODE PEEP announcement; the whole floor is hunting
+// Each tier also makes your bladder fill faster (the tension of being a mess).
+// The DEODORANT perk shrinks the smell radius, so it's a real counterweight, not free.
+let wetAt = NaN;    // G.runTime when the pants first went wet (NaN = dry). setWet can
+// backdate it to a negative value, so it's a NaN sentinel, not a >=0 check.
+let codePeepT = 0; // CODE PEEP announcement cooldown (tier 3)
+function wetT(): number { return (G.wet && !Number.isNaN(wetAt)) ? Math.max(0, G.runTime - wetAt) : 0; }
+function wetTier(): number { const t = wetT(); return t >= 90 ? 3 : t >= 60 ? 2 : t >= 30 ? 1 : 0; }
+function wetStinkTier(): number { return [1.0, 1.4, 1.8, 2.2][wetTier()]; }
+function wetSmellRadius(): number { return 7 * perkWetSeen * wetStinkTier(); }
+let wetTierShown = -1; // the highest tier the player has actually been told about
+function wetEscalate(dt: number): void {
+  if (!G.wet || G.mode !== 'play') return;
+  const tier = wetTier();
+  // tier-transition toasts — the store's growing awareness, announced once each
+  if (tier > wetTierShown) {
+    if (tier === 1) toast('The smell is doing laps around the cereal aisle. The store has started to notice.');
+    if (tier === 2) toast('Staff are no longer asking questions. The wet-jeans man is a theory now.');
+    if (tier === 3) toast('Over the tannoy: "CODE PEEP. Code peep, all departments." Everyone is looking at you. Everyone is.');
+    wetTierShown = tier;
+  }
+  // tier 2+: staff can SMELL you — they go on alert toward your position without
+  // ever getting a clean visual. This is the "audience attention" becoming mechanical.
+  if (tier >= 2) {
+    for (const s of staff) {
+      if (s.floor !== G.floor || s.state === 'chase') continue;
+      const d = Math.hypot(hero.position.x - s.x, hero.position.z - s.z);
+      if (d < wetSmellRadius() && s.state !== 'alert') staffHear(s, player.x, player.z, '...is that the wet-jeans man?');
+    }
+  }
+  // tier 3: the CODE PEEP announcement — a manager on this floor is now hunting,
+  // and they put every guard on the floor on alert toward you. Cooldown so it
+  // reads as a single moment of maximum embarrassment, not a per-frame spam.
+  codePeepT -= dt;
+  if (tier >= 3 && codePeepT <= 0) {
+    codePeepT = 20;
+    let any = false;
+    for (const s of staff) {
+      if (s.floor !== G.floor) continue;
+      if (s.state === 'patrol') { s.state = 'alert'; s.t = 8; s.wpIdx = s.wp.length; any = true; }
+    }
+    if (any) toast('A manager is doing a slow, purposeful lap. The cart in their hands is full of nothing.');
+  }
+}
 
 let toastT = 0;
 const hud = document.getElementById('hud')!;
@@ -129,9 +184,37 @@ const PERKS: Record<string, { name: string; desc: string; apply: () => void }> =
     desc: 'Max pressure 110. You can now hold more than is healthy.',
     apply: () => { perkFull = 110; toast('Perk: ELASTIC BLADDER. The tank is bigger. The dread is bigger too.'); },
   },
+  // M10: the pool deepens — five more ways the store "benefits" you
+  icewater: {
+    name: 'ICE WATER',
+    desc: 'Bladder fills 10% slower for this shift. It\'s only water. It\'s very cold water.',
+    apply: () => { perkFillMul = 0.9; toast('Perk: ICE WATER. The fill meter respects the hydration.'); },
+  },
+  tucked: {
+    name: 'TUCKED IN',
+    desc: 'Sprinting costs +0.55 fill instead of +0.8. The shirt is tucked. The knees are locked.',
+    apply: () => { perkSprintCost = 0.55; toast('Perk: TUCKED IN. Professional posture, amateur bladder.'); },
+  },
+  napkins: {
+    name: 'TWO PACKS OF NAPKINS',
+    desc: 'Wet pants no longer slow you down. Absorbency is dignity you can carry.',
+    apply: () => { perkWetSpeed = 1.0; toast('Perk: NAPKINS. The wet-pants tax is waived.'); },
+  },
+  coldbrew: {
+    name: 'COLD BREW LOYALTY',
+    desc: 'Free coffee still fills you, but now it\'s worth +30 score. A trade you understand.',
+    apply: () => { perkCoffeeScore = 30; toast('Perk: COLD BREW LOYALTY. Every sample is an investment.'); },
+  },
+  deodorant: {
+    name: 'EUCALYPTUS DEODORANT',
+    desc: 'Wet pants are 30% harder to smell. Staff lose you in the produce aisle.',
+    apply: () => { perkWetSeen = 0.7; toast('Perk: DEODORANT. You smell like a spa that ran out of money.'); },
+  },
 };
 const PERK_KEYS = Object.keys(PERKS);
 let perkCoffee = 12, perkRecovery = 35, perkSprint = 0, perkSqueak = 11, perkFull = FULL;
+// M10 perk params (each perk rewrites one; startRun resets them all)
+let perkFillMul = 1, perkSprintCost = 0.8, perkWetSpeed = 0.88, perkCoffeeScore = 0, perkWetSeen = 1;
 const perksTaken: string[] = [];
 let perkPicker: HTMLElement | null = null;
 let perkPaused = false;
@@ -272,6 +355,12 @@ const spillZones: { x: number; z: number; r: number }[][] = [[], []]; // circula
 
 // the frozen lake stays put (it's sacred); seeded extra patches move around
 const LAKE1: Rect = { x: 10, z: 11, hx: 5, hz: 4 };
+// M10: the store is a bladder map — named zones with a face. Produce mist = cold
+// = fill. Deli counter = warm = relax. (mod values 0.7 / -0.3 are unique: no
+// collision with ice 1.6, flicker 0.4, coffee 0.35, crouch -0.4, sprint 0.8/0.55)
+const MIST_ZONE: Rect = { x: -21.2, z: 2.5, hx: 2.4, hz: 6.4 };
+const DELI_ZONE: Rect = { x: 16.4, z: -10.5, hx: 3.0, hz: 2.6 };
+const produceMist: THREE.Object3D[] = []; // M10: drifting cold-mist particles
 
 // world floors — the camera's floor oracle, so it can NEVER dip under
 function floorY(x: number, z: number): number {
@@ -349,6 +438,7 @@ function buildHall(seed: number): void {
   const rng = mulberry32(seed);
   disposeGroup(store1);
   iceRects[0].length = 0; spillZones[0].length = 0;
+  for (const m of produceMist) m.parent?.remove(m); produceMist.length = 0; // M10: sweep old mist
   floorSolids[0].length = 0; floorCamSolids[0].length = 0;
   const g = store1;
 
@@ -417,6 +507,43 @@ function buildHall(seed: number): void {
   shelfRow(-3 + (rng() - 0.5) * 1.2, -6 + (rng() - 0.5) * 2, 'z', 12 + rng() * 4);
   shelfRow(4 + (rng() - 0.5) * 1.2, -6 + (rng() - 0.5) * 2, 'z', 12 + rng() * 4);
   shelfRow(8, 4 + (rng() - 0.5) * 2, 'x', 10 + rng() * 4);
+
+  // M10: PRODUCE display (west wall) — cold mist. Standing in it FILLs you faster
+  // (the store is a bladder map: cold = urgency). The mist is a drifting particle group.
+  box(g, 1, 2.6, 1.1, 10.4, -21.2, 0.55, 2.5, mat(0x3f5a41), false);
+  box(g, 1, 3.0, 0.25, 11.2, -21.2, 0.12, 2.5, mat(0x4a6a50), false); // display base
+  for (let i = 0; i < 9; i++) {
+    const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.22, 8, 6), mat(merchColors[i % merchColors.length]));
+    fruit.position.set(-21.2 + (i % 3) * 0.7 - 0.7, 1.2, -2.2 + i * 1.3);
+    fruit.castShadow = true;
+    g.add(fruit);
+  }
+  // cold mist: a cluster of soft translucent spheres that drift (module-level, stepped in the loop)
+  const mistMat = new THREE.MeshBasicMaterial({ color: 0xbfe8ff, transparent: true, opacity: 0.10, depthWrite: false });
+  for (let i = 0; i < 14; i++) {
+    const p = new THREE.Mesh(new THREE.SphereGeometry(0.5 + Math.random() * 0.4, 8, 6), mistMat);
+    p.position.set(-21 + (Math.random() - 0.5) * 2.4, 0.5 + Math.random() * 1.4, -3 + Math.random() * 11);
+    p.userData.mt = Math.random() * 6.28; // per-particle drift phase
+    g.add(p);
+    produceMist.push(p);
+  }
+  {
+    const pl = new THREE.PointLight(0x9fd8ff, 10, 13, 1.8);
+    pl.position.set(-21, 2.4, 2.5);
+    g.add(pl);
+  }
+  addBox(1, -21.4, 2.5, 1.5, 5.7); // the display is solid: you can't walk through the produce
+  // M10: DELI counter (NE) — the warm counter. Standing in its range RELAXES the
+  // bladder a little (warmth = relief, the counterweight to the produce cold).
+  box(g, 1, 2.6, 1.15, 3.4, 18.6, 0.575, -10.5, mat(0x8a6f4d));
+  box(g, 1, 2.8, 0.18, 3.6, 18.6, 1.24, -10.5, mat(0xd8c9a8), false); // counter top
+  box(g, 1, 2.2, 0.9, 2.6, 18.6, 1.85, -10.5, mat(0xcfd8e0, 0.18), false); // glass display
+  {
+    const dl = new THREE.PointLight(0xffb070, 12, 11, 1.8);
+    dl.position.set(18.6, 2.4, -10.5);
+    g.add(dl);
+  }
+  addBox(1, 18.6, -10.5, 1.5, 1.9); // the counter is solid
 
   // frozen lake (always) + seeded second patch somewhere in the south aisles
   iceRects[0].push({ ...LAKE1 });
@@ -863,7 +990,7 @@ function shopperStep(s: Shopper, dt: number): void {
   }
   if (G.wet && G.mode === 'play' && G.runTime > s.nextReact) {
     const hd = Math.hypot(hero.position.x - s.x, hero.position.z - s.z);
-    if (hd < 7) {
+    if (hd < wetSmellRadius()) {
       s.nextReact = G.runTime + 14 + Math.random() * 12;
       const lines = ['"Oh. OH."', 'A shopper pretends not to smell that.', '"It\'s the wet-jeans man."', 'Someone is filming this. For TikTok.', 'A shopper quietly grabs their cart for leverage.'];
       toast(lines[Math.floor(Math.random() * lines.length)]);
@@ -1054,7 +1181,8 @@ function buildInteractables(): void {
         G.coffeeCd = 30;
         G.pressure = Math.min(perkFull, G.pressure + perkCoffee);
         G.mods.push(0.35);
-        toast('Free espresso. Tastes like victory. (Your bladder notes this.)');
+        if (perkCoffeeScore > 0) { G.score += perkCoffeeScore; toast('Free espresso. Tastes like victory. (+30 loyalty, bladder noted.)'); }
+        else toast('Free espresso. Tastes like victory. (Your bladder notes this.)');
       } },
     { x: -16.9, z: -13.2, r: 2.0, floor: 2, hint: () => 'Use the STAFF toilet (legally risky)', on: () => {
         relieving = true;
@@ -1074,6 +1202,10 @@ function startRun(seed?: number): void {
   G.legendSeen = false; G.spooks = 0; G.sheds = 0; G.crouchT = 0; // M7: story facts
   tutorialIdx = tutorialSeen ? TUTORIAL.length : 0;
   perkCoffee = 12; perkRecovery = 35; perkSprint = 0; perkSqueak = 11; perkFull = FULL;
+  perkFillMul = 1; perkSprintCost = 0.8; perkWetSpeed = 0.88; perkCoffeeScore = 0; perkWetSeen = 1; // M10
+  wetAt = NaN; codePeepT = 0; wetTierShown = -1; // M10: wet-escalation state
+  codePeepEvT = 0; // M10: CODE PEEP event
+  for (const m of icePatches) m.parent?.remove(m); icePatches.length = 0; // M10: sweep runtime ice
   perksTaken.length = 0;
   perkPicker?.remove(); perkPicker = null; perkPaused = false;
   closeWardrobe();
@@ -1108,6 +1240,7 @@ function startRun(seed?: number): void {
 }
 function accident(caught = false): void {
   if (caught) return;
+  if (!G.wet) wetAt = G.runTime; // M10: the embarrassment clock starts at the splash
   G.wet = true;
   G.pressure = Math.min(perkRecovery, pantsNow().recovery);
   G.accidents++;
@@ -1302,11 +1435,87 @@ function isSlippery(x: number, z: number): boolean {
 let flickerT = 0, flickerOn = false;
 let panicOn = false;
 let eventTimer = 24 + Math.random() * 16;
+let codePeepEvT = 0;   // M10: CODE PEEP event — timed +0.6 fill while the announcement rings out
+// M10: runtime ice patches (ICE BURST events). Tracked so startRun can sweep them
+// off the floor — they're not seeded, so they'd otherwise leak across restarts.
+const icePatches: THREE.Mesh[] = [];
+// M10: the store is a bladder map — a weighted pool of pressure spikes, each with
+// a face. Every event reads as "the store did this to you," not "the RNG ticked."
+type PPEvent = { key: string; w: number; run: () => void };
+const PP_EVENTS: PPEvent[] = [
+  {
+    key: 'legend', w: 8,
+    run: () => { if (G.floor === 1 && !legend) spawnLegend(); },
+  },
+  {
+    key: 'flicker', w: 18,
+    run: () => {
+      if (flickerOn) return;
+      flickerOn = true; flickerT = 6;
+      toast('The fluorescent strip above you commits to flickering. Pee-shivers incoming.');
+      addMod(0.4);
+    },
+  },
+  {
+    key: 'puddle', w: 20,
+    run: () => {
+      const rx = THREE.MathUtils.clamp(Math.floor(Math.random() * 5) * -5 - 5 + Math.random() * 4, -20, 20);
+      const rz = THREE.MathUtils.clamp(-12 + Math.random() * 24, -15, 15);
+      spawnPuddle(rx, rz);
+      toast(G.floor === 2 ? 'Oil. Of course it\'s oil.' : 'Somebody mopped that. Somebody who has never peed in their pants.');
+    },
+  },
+  {
+    key: 'codepeep', w: 16,
+    run: () => {
+      if (codePeepEvT > 0) return;
+      codePeepEvT = 8;
+      addMod(0.6);
+      toast('Tannoy: "CODE PEEP. Department is aware." Every guard on this floor just stood up straighter.');
+      for (const s of staff) if (s.floor === G.floor && s.state === 'patrol') { s.state = 'alert'; s.t = 8; s.wpIdx = s.wp.length; }
+    },
+  },
+  {
+    key: 'iceburst', w: 14,
+    run: () => {
+      if (G.floor !== 1) return;
+      const a = Math.random() * Math.PI * 2;
+      const d = 5 + Math.random() * 4;
+      const px = THREE.MathUtils.clamp(player.x + Math.cos(a) * d, -21, 21);
+      const pz = THREE.MathUtils.clamp(player.z + Math.sin(a) * d, -16, 16);
+      iceRects[G.floor - 1].push({ x: px, z: pz, hx: 1.6, hz: 1.6 });
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(3.2, 3.2),
+        new THREE.MeshStandardMaterial({ color: 0xaee0f5, roughness: 0.28, metalness: 0.12, transparent: true, opacity: 0.9 }),
+      );
+      m.rotation.x = -Math.PI / 2; m.position.set(px, 0.011, pz);
+      store1.add(m); icePatches.push(m); // iceburst only fires on floor 1 (the early return above)
+      toast('A freezer door somewhere gives a sigh, and a fresh patch of ice finds you. The store is a bladder map.');
+    },
+  },
+  {
+    key: 'samplecart', w: 12,
+    run: () => {
+      if (G.wet) return;
+      G.pressure = Math.min(perkFull, G.pressure + 10);
+      toast('The sample cart finds you. "One little bite?" You take one. (That was a coffee. That was definitely a coffee.)');
+    },
+  },
+];
+function rollEvent(): void {
+  const total = PP_EVENTS.reduce((a, e) => a + e.w, 0);
+  let r = Math.random() * total;
+  for (const e of PP_EVENTS) {
+    r -= e.w;
+    if (r <= 0) { e.run(); return; }
+  }
+  PP_EVENTS[0].run();
+}
 
 // ---------- debug hooks ----------
 window.__cap = {
   state: () => ({
-    mode: G.mode, pressure: +G.pressure.toFixed(1), wet: G.wet, state: stateName(),
+    mode: G.mode, pressure: +G.pressure.toFixed(1), wet: G.wet, wetT: wetT() >= 0 ? +wetT().toFixed(1) : -1, wetTier: wetTier(), smellR: +wetSmellRadius().toFixed(1), state: stateName(),
     x: +player.x.toFixed(2), z: +player.z.toFixed(2),
     yaw: +camYaw.toFixed(2), pitch: +camRig.pitch.toFixed(2),
     speed: +Math.hypot(vel.x, vel.z).toFixed(2),
@@ -1330,6 +1539,7 @@ window.__cap = {
     footstepCount, staffStepCount, nearMissCount, // M8 feel: probe-visible cadence counters
     heroModelLoaded,
     heroJeansMats: heroJeansMats.length,
+    mods: [...G.mods],
     inFreezer: isIce(player.x, player.z),
     slippery: isSlippery(player.x, player.z),
     panic: panicOn,
@@ -1347,6 +1557,12 @@ window.__cap = {
   floor: (n: number) => { if (n === G.floor) return; G.floor = n; G.floors.add(n); applyAtmos(n); },
   set: (k: string, v: number) => { if (k === 'pressure') { G.pressure = v; if (v >= perkFull) accident(); } if (k === 'closing') G.closing = v; },
   perkForce: () => { if (!perkPicker && G.mode === 'play') showPerkPicker(); },
+  perkPicker: () => {
+    if (!perkPicker) return false;
+    const b = perkPicker.querySelector('.popt');
+    if (b) (b as HTMLElement).click(); // take the first offer, un-pause the clock
+    return true;
+  },
   wardrobe: () => { if (wardrobeOpen) closeWardrobe(); else showWardrobe(); },
   shoppersReact: (t: number) => { for (const s of shoppers) s.nextReact = t; },
   shoppersNear: (x: number, z: number, n: number) => {
@@ -1377,6 +1593,17 @@ window.__cap = {
   staffPatrol: () => {
     for (const s of staff) if (s.floor === 1) { s.state = 'patrol'; s.t = 0; s.wpIdx = 0; }
   },
+  // M10: probe hooks — force a specific event from the pool, read active mods
+  forceEvent: (key: string) => {
+    const e = PP_EVENTS.find((x) => x.key === key);
+    if (e) e.run();
+    return !!e;
+  },
+  mods: () => [...G.mods],
+  ice: () => iceRects[G.floor - 1].map((r) => [ +r.x.toFixed(2), +r.z.toFixed(2) ]),
+  rate: () => +pressureRate().toFixed(3),
+  takePerk: (key: string) => { const p = PERKS[key]; if (p) { p.apply(); if (!perksTaken.includes(key)) perksTaken.push(key); return true; } return false; },
+  setWet: (t: number) => { if (!G.wet) accident(); wetAt = G.runTime - t; },
   staffLos: () => staff.filter((s) => s.floor === 1).map((s) => staffLos(s)),
   heroMesh: () => [ +hero.position.x.toFixed(2), +hero.position.z.toFixed(2) ],
   staffPin: (x: number, z: number) => {
@@ -1502,12 +1729,14 @@ function step(): void {
     crouching = !sprinting && (keys.has('KeyC') || keys.has('ControlLeft'));
     if (crouching && !crouchToasted && G.runTime > 8) { crouchToasted = true; toast('You crouch behind a cereal endcap, pretending to read the nutrition label. Your bladder pretends not to exist.'); }
     let sp = sprinting && moving ? SPRINT + perkSprint : crouching ? SPEED * 0.45 : SPEED;
-    if (G.wet) sp *= 0.88;
-    // M6: sprinting bounces the bladder — speed is a cost on every axis
+    if (G.wet) sp *= perkWetSpeed; // M10: NAPKINS perk can waive the wet-pants tax
+    // M6: sprinting bounces the bladder — speed is a cost on every axis.
+    // M10: the cost is a perk param (TUCKED IN: 0.8 -> 0.55, a value no other
+    // mod uses). Clear both tiers before pushing the active one.
     if (sprinting && moving) {
-      if (!G.mods.includes(0.8)) G.mods.push(0.8);
+      delMod(0.8); delMod(0.55); G.mods.push(perkSprintCost);
     } else {
-      delMod(0.8);
+      delMod(0.8); delMod(0.55);
     }
     // M6: fake-shopping — crouched and pretending = the bladder buys seconds
     if (isCrouched()) {
@@ -1563,6 +1792,26 @@ function step(): void {
     } else {
       delMod(1.6);
     }
+    // M10: named zones — the store is a bladder map. Produce mist (cold) FILLs;
+    // the deli counter (warm) RELAXES. Distinct from ice 1.6 / flicker 0.4 etc.
+    if (G.floor === 1 && inRect(player.x, player.z, MIST_ZONE)) {
+      if (!G.mods.includes(0.7)) G.mods.push(0.7);
+    } else {
+      delMod(0.7);
+    }
+    if (G.floor === 1 && inRect(player.x, player.z, DELI_ZONE)) {
+      if (!G.mods.includes(-0.3)) G.mods.push(-0.3);
+    } else {
+      delMod(-0.3);
+    }
+    // M10: the produce mist drifts — slow billows, per-particle phase
+    if (G.floor === 1) {
+      for (const p of produceMist) {
+        p.userData.mt += dt * 0.4;
+        p.position.y = 0.7 + Math.sin(p.userData.mt) * 0.35;
+        p.position.x += Math.sin(p.userData.mt * 0.7) * dt * 0.15;
+      }
+    }
 
     // doorway to the parking deck: walk through fast to flee upward (or back)
     if (G.floor === 1 && swapCd <= 0 && Math.hypot(player.x - HALL_DOOR.x, player.z - HALL_DOOR.z) < HALL_DOOR.r && Math.hypot(vel.x, vel.z) > 1.5) swapFloor(2);
@@ -1610,23 +1859,18 @@ function step(): void {
     legendStep(dt);
     splashStep(dt);
     tutorialStep(dt);
+    wetEscalate(dt); // M10: wet-state embarrassment escalates over time
 
-    // random mess
+    // random mess — M10: a weighted event pool, the store is a bladder map.
+    // Every event is a pressure spike with a face: the store never just "happens".
     eventTimer -= dt;
+    if (codePeepEvT > 0) {
+      codePeepEvT -= dt;
+      if (codePeepEvT <= 0) delMod(0.6);
+    }
     if (eventTimer <= 0) {
       eventTimer = 30 + Math.random() * 22;
-      if (G.floor === 1 && !legend && Math.random() < 0.2) {
-        spawnLegend();
-      } else if (G.floor === 1 && !flickerOn && Math.random() < 0.5) {
-        flickerOn = true; flickerT = 6;
-        toast('The fluorescent strip above you commits to flickering. Pee-shivers incoming.');
-        addMod(0.4);
-      } else {
-        const rx = THREE.MathUtils.clamp(Math.floor(Math.random() * 5) * -5 - 5 + Math.random() * 4, -20, 20);
-        const rz = THREE.MathUtils.clamp(-12 + Math.random() * 24, -15, 15);
-        spawnPuddle(rx, rz);
-        toast(G.floor === 2 ? 'Oil. Of course it\'s oil.' : 'Somebody mopped that. Somebody who has never peed in their pants.');
-      }
+      rollEvent();
     }
     if (flickerOn) {
       flickerT -= dt;
