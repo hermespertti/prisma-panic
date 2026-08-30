@@ -318,8 +318,14 @@ function dismissTitle(): void {
   titleUp = false;
   if (titleEl) titleEl.style.display = 'none';
   if (isTouch) buildTouchUI(); // touch is reliable by first-tap time; desktop stays clean
-  const p = renderer.domElement.requestPointerLock?.() as unknown as Promise<void> | undefined;
-  p?.catch?.(() => { /* programmatic unlock (probes) — no gesture, no big deal */ });
+  // M13 soak catch: pointer-lock retargets ALL pointer events to the canvas and
+  // starves the touch look-zone listeners. Desktop wants the lock; a phone never
+  // does (real mobile browsers mostly ignore the request anyway — headless honored
+  // it and silently broke look drags). Only lock for fine pointers.
+  if (!isTouch) {
+    const p = renderer.domElement.requestPointerLock?.() as unknown as Promise<void> | undefined;
+    p?.catch?.(() => { /* programmatic unlock (probes) — no gesture, no big deal */ });
+  }
   SFX.humStart();
 }
 
@@ -1596,6 +1602,7 @@ window.__cap = {
     inFreezer: isIce(player.x, player.z),
     slippery: isSlippery(player.x, player.z),
     panic: panicOn,
+    perkFull, // M13: the bladder ceiling moves with perks (ELASTIC=110) — probes read it
     crouching: isCrouched(),
     staff: staff.filter((s) => s.floor === G.floor).map((s) => ({ s: s.state, d: +Math.hypot(hero.position.x - s.x, hero.position.z - s.z).toFixed(1), lost: +s.lostT.toFixed(2) })),
     toasts: [...G.toasts], ending: G.ending,
@@ -1691,6 +1698,7 @@ window.__cap = {
   // M8: soak-test world map — where the bot has to actually go
   nav: () => ({
     car: { x: carPos.x, z: carPos.z },
+    solids: floorSolids.map((f) => f.map((b) => ({ x: +b.x.toFixed(2), z: +b.z.toFixed(2), hx: +b.hx.toFixed(2), hz: +b.hz.toFixed(2) }))),
     toilets: { floor1: { x: -22, z: -14.5 }, deck: { x: -16.9, z: -13.2 } },
     doors: { hall: { x: 23.2, z: 12.1 }, deck: { x: 21.2, z: -13.9 } },
     quads: seedQuads.map((q) => ({ f: q.f, x: +q.x.toFixed(1), z: +q.z.toFixed(1) })),
