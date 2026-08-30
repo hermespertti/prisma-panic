@@ -3,3 +3,6 @@ dist/
 shots/
 .godot/
 *.tsbuildinfo
+dbg-*.mjs
+dbg-*.png
+s1337*.log
