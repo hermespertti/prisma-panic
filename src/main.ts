@@ -1593,6 +1593,7 @@ window.__cap = {
     wardrobeOpen,
     legendActive: !!legend,
     legendPos: legend ? { x: +legend.obj.position.x.toFixed(1), z: +legend.obj.position.z.toFixed(1) } : null,
+    legendSeen: G.legendSeen, // M15: chaos soak reads whether the sighting actually landed
     tutorialSeen,
     titleUp,
     footstepCount, staffStepCount, nearMissCount, // M8 feel: probe-visible cadence counters
@@ -1650,6 +1651,9 @@ window.__cap = {
     }
   },
   staffPos: () => staff.filter((s) => s.floor === G.floor).map((s) => [ +s.x.toFixed(2), +s.z.toFixed(2) ]),
+  // M15: every guard on every floor (frozen or not) — the deck-ramp camouflage
+  // check reads the deck crew's frozen positions before committing the cross.
+  staffAll: () => staff.map((s) => ({ f: s.floor, s: s.state, x: +s.x.toFixed(2), z: +s.z.toFixed(2) })),
   staffChaseAt: (pts: [number, number][]) => {
     const f1 = staff.filter((s) => s.floor === 1);
     f1.forEach((s, i) => {
